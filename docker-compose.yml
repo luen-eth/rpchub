@@ -1,0 +1,17 @@
+services:
+  rpchub:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "9563:9563"
+    environment:
+      CHAIN_IDS: "1,56"
+      SOLANA_ENABLED: "true"
+      # ALIASES: "bsc:56"
+      # EXTRA_RPCS_1: "https://my-eth-node.local"
+      # LOG_LEVEL: "info"
+    volumes:
+      - rpchub-data:/data # chainlist cache: survives restarts, boots offline
+
+volumes:
+  rpchub-data:
