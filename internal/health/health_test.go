@@ -115,6 +115,71 @@ func TestProbeHTTPErrorAndRPCError(t *testing.T) {
 	}
 }
 
+// evmServerWithArchive also answers eth_getBalance: like an archive node
+// when archive is true, like a pruned node otherwise.
+func evmServerWithArchive(t *testing.T, archive bool) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Method string `json:"method"`
+		}
+		json.Unmarshal(body, &req)
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "eth_chainId":
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x1"}`))
+		case "eth_blockNumber":
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x64"}`))
+		case "eth_getBalance":
+			if archive {
+				w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x0"}`))
+			} else {
+				w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"missing trie node"}}`))
+			}
+		default:
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}`))
+		}
+	}))
+}
+
+func TestArchiveDetection(t *testing.T) {
+	arch := evmServerWithArchive(t, true)
+	defer arch.Close()
+	pruned := evmServerWithArchive(t, false)
+	defer pruned.Close()
+
+	p, pl := newProber(t, arch.URL, pruned.URL)
+	p.Sweep(context.Background())
+
+	s := pl.Snapshot(true)
+	if s.Endpoints[0].Archive == nil || !*s.Endpoints[0].Archive {
+		t.Fatalf("archive endpoint = %+v, want archive=true", s.Endpoints[0])
+	}
+	if s.Endpoints[1].Archive == nil || *s.Endpoints[1].Archive {
+		t.Fatalf("pruned endpoint = %+v, want archive=false", s.Endpoints[1])
+	}
+	if s.ArchiveHealthy != 1 || s.Healthy != 2 {
+		t.Fatalf("snapshot = healthy %d, archive_healthy %d", s.Healthy, s.ArchiveHealthy)
+	}
+}
+
+func TestEVMInterpretArchive(t *testing.T) {
+	e := EVM{ChainID: 1}
+	if ok, err := e.InterpretArchive([]byte(`{"result":"0x1234"}`)); err != nil || !ok {
+		t.Errorf("balance result: ok=%v err=%v", ok, err)
+	}
+	if ok, err := e.InterpretArchive([]byte(`{"error":{"code":-32000,"message":"missing trie node"}}`)); err != nil || ok {
+		t.Errorf("pruned error: ok=%v err=%v, want definitive false", ok, err)
+	}
+	if _, err := e.InterpretArchive([]byte(`<html>`)); err == nil {
+		t.Error("garbage must be a transient error")
+	}
+	if _, err := e.InterpretArchive([]byte(`{"result":42}`)); err == nil {
+		t.Error("non-hex result must be a transient error")
+	}
+}
+
 func TestSolanaAdapterParsing(t *testing.T) {
 	s := Solana{}
 	if h, err := s.ParseHeight([]byte(`{"jsonrpc":"2.0","id":1,"result":250000000}`)); err != nil || h != 250000000 {
@@ -162,6 +227,9 @@ func TestSolanaProbeEndToEnd(t *testing.T) {
 	ep := pl.Snapshot(true).Endpoints[0]
 	if ep.Status != "healthy" || ep.Height != 250000000 {
 		t.Fatalf("endpoint = %+v", ep)
+	}
+	if ep.Archive != nil {
+		t.Fatalf("solana endpoints must never get an archive verdict, got %v", *ep.Archive)
 	}
 }
 

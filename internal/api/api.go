@@ -23,14 +23,15 @@ type Server struct {
 }
 
 type chainInfo struct {
-	Chain   string   `json:"chain"`
-	ChainID int64    `json:"chain_id,omitempty"`
-	Name    string   `json:"name"`
-	Kind    string   `json:"kind"`
-	Tokens  []string `json:"tokens,omitempty"`
-	Healthy int      `json:"healthy"`
-	Total   int      `json:"total"`
-	Height  uint64   `json:"height,omitempty"`
+	Chain          string   `json:"chain"`
+	ChainID        int64    `json:"chain_id,omitempty"`
+	Name           string   `json:"name"`
+	Kind           string   `json:"kind"`
+	Tokens         []string `json:"tokens,omitempty"`
+	Healthy        int      `json:"healthy"`
+	ArchiveHealthy int      `json:"archive_healthy"`
+	Total          int      `json:"total"`
+	Height         uint64   `json:"height,omitempty"`
 }
 
 // Chains handles GET /chains.
@@ -43,14 +44,15 @@ func (s *Server) Chains(w http.ResponseWriter, _ *http.Request) {
 		}
 		snap := pl.Snapshot(false)
 		out = append(out, chainInfo{
-			Chain:   ch.Key,
-			ChainID: ch.ChainID,
-			Name:    ch.Name,
-			Kind:    ch.Kind.String(),
-			Tokens:  s.Reg.Tokens(ch.Key),
-			Healthy: snap.Healthy,
-			Total:   snap.Total,
-			Height:  snap.RefHeight,
+			Chain:          ch.Key,
+			ChainID:        ch.ChainID,
+			Name:           ch.Name,
+			Kind:           ch.Kind.String(),
+			Tokens:         s.Reg.Tokens(ch.Key),
+			Healthy:        snap.Healthy,
+			ArchiveHealthy: snap.ArchiveHealthy,
+			Total:          snap.Total,
+			Height:         snap.RefHeight,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -117,7 +119,7 @@ func (s *Server) Root(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service": "rpchub",
-		"usage":   "POST /{chainId|slug|alias} with a JSON-RPC body (e.g. POST /1, /ethereum, /56, /solana)",
+		"usage":   "POST /{chainId|slug|alias} with a JSON-RPC body (e.g. POST /1, /ethereum, /56, /solana); POST /{chain}/archive for archive-verified upstreams (EVM only)",
 		"ops":     []string{"GET /chains", "GET /health", "GET /{chain}/health"},
 	})
 }

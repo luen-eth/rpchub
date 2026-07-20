@@ -35,7 +35,7 @@ var DefaultSolanaRPCs = []string{
 }
 
 // reservedTokens are path segments used by rpchub's own API.
-var reservedTokens = map[string]bool{"health": true, "chains": true, "metrics": true}
+var reservedTokens = map[string]bool{"health": true, "chains": true, "metrics": true, "archive": true}
 
 // Chain is one proxied chain with its sanitized endpoint list.
 type Chain struct {

@@ -90,3 +90,38 @@ func (e EVM) VerifyIdentity(body []byte) (bool, error) {
 }
 
 func (EVM) LagLimit(base uint64) uint64 { return base }
+
+// ArchiveProber is implemented by adapters that can detect archive-capable
+// endpoints. Solana intentionally does not implement it: historical storage
+// works differently there (BigTable-backed), so rpchub exposes no
+// /solana/archive path.
+type ArchiveProber interface {
+	// ArchiveRequest asks for state old enough that pruned nodes cannot answer.
+	ArchiveRequest() []byte
+	// InterpretArchive turns the response into a verdict. A nil error means
+	// the verdict is definitive; a non-nil error means the check itself
+	// failed (garbage response) and should be retried later.
+	InterpretArchive(body []byte) (isArchive bool, err error)
+}
+
+// ArchiveRequest queries the zero address balance at block 1: any chain is
+// past block 1, archive nodes answer, pruned nodes return a state error
+// ("missing trie node", "state not available", ...).
+func (EVM) ArchiveRequest() []byte {
+	return []byte(`{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0x0000000000000000000000000000000000000000","0x1"]}`)
+}
+
+func (EVM) InterpretArchive(body []byte) (bool, error) {
+	var r rpcResponse
+	if err := json.Unmarshal(body, &r); err != nil {
+		return false, fmt.Errorf("non-JSON archive probe response")
+	}
+	if r.Error != nil {
+		return false, nil // pruned (or method-restricted): verifiably not usable as archive
+	}
+	var res string
+	if err := json.Unmarshal(r.Result, &res); err != nil || !strings.HasPrefix(res, "0x") {
+		return false, fmt.Errorf("unexpected archive probe result")
+	}
+	return true, nil
+}

@@ -85,10 +85,11 @@ func TestLoadErrors(t *testing.T) {
 		{"CHAIN_IDS=1", "MAX_RETRIES=0"},
 		{"CHAIN_IDS=1", "LOG_LEVEL=loud"},
 		{"CHAIN_IDS=1", "EXTRA_RPCS_FOO=https://x"},
-		{"CHAIN_IDS=1", "ALIASES=bsc:56"},     // 56 not enabled
-		{"CHAIN_IDS=56", "ALIASES=99:56"},     // numeric alias
-		{"CHAIN_IDS=56", "ALIASES=health:56"}, // reserved
-		{"CHAIN_IDS=56", "ALIASES=bsc=56"},    // bad separator
+		{"CHAIN_IDS=1", "ALIASES=bsc:56"},      // 56 not enabled
+		{"CHAIN_IDS=56", "ALIASES=99:56"},      // numeric alias
+		{"CHAIN_IDS=56", "ALIASES=health:56"},  // reserved
+		{"CHAIN_IDS=56", "ALIASES=archive:56"}, // reserved
+		{"CHAIN_IDS=56", "ALIASES=bsc=56"},     // bad separator
 		{"CHAIN_IDS=1", "PORT=99999"},
 	}
 	for _, environ := range cases {

@@ -17,6 +17,18 @@ const (
 	maxCooldown   = 10 * time.Minute
 	emaAlpha      = 0.3
 	neutralEMA    = 150.0 // ms, assumed for endpoints with a single sample pending
+
+	// archiveRecheck bounds how long an archive verdict is trusted: public
+	// endpoints often sit behind load balancers mixing archive and pruned
+	// nodes, so the answer can change.
+	archiveRecheck = time.Hour
+)
+
+// Archive detection verdict per endpoint.
+const (
+	archiveUnknown uint8 = iota
+	archiveYes
+	archiveNo
 )
 
 type endpoint struct {
@@ -32,6 +44,8 @@ type endpoint struct {
 	lastOK        time.Time
 	totalOK       uint64
 	totalFail     uint64
+	archiveState  uint8
+	archiveAt     time.Time // when archiveState was last decided
 }
 
 // Pool is the endpoint set for a single chain. All methods are safe for
@@ -109,6 +123,35 @@ func (p *Pool) SetVerified(url string) {
 	}
 }
 
+// NeedsArchiveCheck reports whether an archive-capability probe is due for
+// the endpoint (never checked, or the last verdict is older than
+// archiveRecheck).
+func (p *Pool) NeedsArchiveCheck(url string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	ep, ok := p.eps[url]
+	if !ok || ep.wrongChain {
+		return false
+	}
+	return ep.archiveState == archiveUnknown || p.now().Sub(ep.archiveAt) >= archiveRecheck
+}
+
+// SetArchive records the archive-capability verdict for an endpoint.
+func (p *Pool) SetArchive(url string, isArchive bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	ep, ok := p.eps[url]
+	if !ok {
+		return
+	}
+	if isArchive {
+		ep.archiveState = archiveYes
+	} else {
+		ep.archiveState = archiveNo
+	}
+	ep.archiveAt = p.now()
+}
+
 // MarkWrongChain permanently excludes an endpoint that answered for a
 // different chain (wrong eth_chainId / genesis hash).
 func (p *Pool) MarkWrongChain(url, detail string) {
@@ -172,7 +215,9 @@ func (p *Pool) ReportFailure(url, errMsg string) {
 // Pick selects an endpoint, excluding the given URLs (already tried in this
 // request). Preference: healthy non-lagging endpoints via P2C on EMA latency;
 // if none, never-probed endpoints (cold start); known-bad ones are skipped.
-func (p *Pool) Pick(exclude map[string]bool) (string, bool) {
+// With archiveOnly, only endpoints positively verified as archive-capable
+// qualify — unknowns are never served on the archive path.
+func (p *Pool) Pick(exclude map[string]bool, archiveOnly bool) (string, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := p.now()
@@ -181,6 +226,9 @@ func (p *Pool) Pick(exclude map[string]bool) (string, bool) {
 	var prime, fallback []*endpoint
 	for _, ep := range p.list {
 		if ep.wrongChain || exclude[ep.url] || now.Before(ep.cooldownUntil) {
+			continue
+		}
+		if archiveOnly && ep.archiveState != archiveYes {
 			continue
 		}
 		switch {
@@ -244,7 +292,8 @@ func effEMA(ep *endpoint) float64 {
 // EndpointSnapshot is the observable state of one endpoint.
 type EndpointSnapshot struct {
 	URL         string    `json:"url"`
-	Status      string    `json:"status"` // healthy|lagging|cooldown|unproven|wrong_chain
+	Status      string    `json:"status"`            // healthy|lagging|cooldown|unproven|wrong_chain
+	Archive     *bool     `json:"archive,omitempty"` // nil = not determined yet
 	LatencyMS   int       `json:"latency_ms"`
 	Height      uint64    `json:"height,omitempty"`
 	ConsecFails int       `json:"consecutive_fails,omitempty"`
@@ -256,11 +305,12 @@ type EndpointSnapshot struct {
 
 // Snapshot is the observable state of a pool.
 type Snapshot struct {
-	Key       string             `json:"chain"`
-	RefHeight uint64             `json:"ref_height,omitempty"`
-	Healthy   int                `json:"healthy"`
-	Total     int                `json:"total"`
-	Endpoints []EndpointSnapshot `json:"endpoints,omitempty"`
+	Key            string             `json:"chain"`
+	RefHeight      uint64             `json:"ref_height,omitempty"`
+	Healthy        int                `json:"healthy"`
+	ArchiveHealthy int                `json:"archive_healthy"`
+	Total          int                `json:"total"`
+	Endpoints      []EndpointSnapshot `json:"endpoints,omitempty"`
 }
 
 // Snapshot returns the pool state for the ops API.
@@ -284,11 +334,20 @@ func (p *Pool) Snapshot(withEndpoints bool) Snapshot {
 		}
 		if status == "healthy" {
 			s.Healthy++
+			if ep.archiveState == archiveYes {
+				s.ArchiveHealthy++
+			}
+		}
+		var arch *bool
+		if ep.archiveState != archiveUnknown {
+			v := ep.archiveState == archiveYes
+			arch = &v
 		}
 		if withEndpoints {
 			s.Endpoints = append(s.Endpoints, EndpointSnapshot{
 				URL:         ep.url,
 				Status:      status,
+				Archive:     arch,
 				LatencyMS:   int(ep.emaMS),
 				Height:      ep.height,
 				ConsecFails: ep.consecFails,

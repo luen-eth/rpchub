@@ -43,8 +43,9 @@ func okJSON(body string) http.HandlerFunc {
 }
 
 // newHub builds a registry+pool for chain 1 backed by the given endpoint URLs
-// and returns an httptest server running the real mux routes.
-func newHub(t *testing.T, retries int, urls ...string) *httptest.Server {
+// and returns an httptest server running the real mux routes, plus the pool
+// set so tests can shape endpoint state (archive flags etc).
+func newHub(t *testing.T, retries int, urls ...string) (*httptest.Server, *pool.Set) {
 	t.Helper()
 	entries := []registry.ChainEntry{{
 		Name: "Ethereum Mainnet", ChainID: 1, ChainSlug: "ethereum", ShortName: "eth",
@@ -57,7 +58,7 @@ func newHub(t *testing.T, retries int, urls ...string) *httptest.Server {
 		}(),
 	}}
 	reg := registry.New()
-	if err := reg.Update(entries, registry.BuildOptions{ChainIDs: []int64{1}, AllowHTTP: true}); err != nil {
+	if err := reg.Update(entries, registry.BuildOptions{ChainIDs: []int64{1}, AllowHTTP: true, SolanaEnabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	pools := pool.NewSet()
@@ -76,9 +77,12 @@ func newHub(t *testing.T, retries int, urls ...string) *httptest.Server {
 	mux.HandleFunc("POST /{chain}", h.Proxy)
 	mux.HandleFunc("OPTIONS /{chain}", h.Options)
 	mux.HandleFunc("GET /{chain}", h.MethodHint)
+	mux.HandleFunc("POST /{chain}/archive", h.ProxyArchive)
+	mux.HandleFunc("OPTIONS /{chain}/archive", h.Options)
+	mux.HandleFunc("GET /{chain}/archive", h.ArchiveHint)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, pools
 }
 
 func post(t *testing.T, url, body string) (*http.Response, string) {
@@ -97,7 +101,7 @@ const rpcReq = `{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}`
 func TestProxySuccess(t *testing.T) {
 	want := `{"jsonrpc":"2.0","id":1,"result":"0x64"}`
 	up, c := upstream(t, okJSON(want))
-	hub := newHub(t, 3, up.URL)
+	hub, _ := newHub(t, 3, up.URL)
 
 	for _, path := range []string{"/1", "/ethereum", "/eth"} {
 		resp, body := post(t, hub.URL+path, rpcReq)
@@ -122,7 +126,7 @@ func TestFailoverAcrossBadUpstreams(t *testing.T) {
 	bad500, _ := upstream(t, func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "boom", 500) })
 	badHTML, _ := upstream(t, func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "<html>cf</html>") })
 	good, gc := upstream(t, okJSON(want))
-	hub := newHub(t, 4, bad429.URL, bad500.URL, badHTML.URL, good.URL)
+	hub, _ := newHub(t, 4, bad429.URL, bad500.URL, badHTML.URL, good.URL)
 
 	resp, body := post(t, hub.URL+"/1", rpcReq)
 	if resp.StatusCode != 200 || body != want {
@@ -142,7 +146,7 @@ func TestExhaustedReturnsLastUpstreamResponse(t *testing.T) {
 		w.WriteHeader(503)
 		io.WriteString(w, `{"error":"overloaded"}`)
 	})
-	hub := newHub(t, 3, a.URL, b.URL)
+	hub, _ := newHub(t, 3, a.URL, b.URL)
 
 	resp, body := post(t, hub.URL+"/1", rpcReq)
 	if resp.StatusCode != 503 || !strings.Contains(body, "overloaded") {
@@ -154,7 +158,7 @@ func TestTransportErrorsYield502(t *testing.T) {
 	dead := httptest.NewServer(http.NotFoundHandler())
 	deadURL := dead.URL
 	dead.Close() // connection refused from now on
-	hub := newHub(t, 3, deadURL)
+	hub, _ := newHub(t, 3, deadURL)
 
 	resp, body := post(t, hub.URL+"/1", rpcReq)
 	if resp.StatusCode != 502 {
@@ -184,7 +188,7 @@ func TestBatchPassthrough(t *testing.T) {
 		}
 		okJSON(want)(w, r)
 	})
-	hub := newHub(t, 3, up.URL)
+	hub, _ := newHub(t, 3, up.URL)
 
 	resp, body := post(t, hub.URL+"/1", `[{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber"},{"jsonrpc":"2.0","id":2,"method":"eth_chainId"}]`)
 	if resp.StatusCode != 200 || body != want {
@@ -201,7 +205,7 @@ func TestClientBadRequestPassesThroughWithoutRetry(t *testing.T) {
 		w.WriteHeader(400)
 		io.WriteString(w, `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}}`)
 	})
-	hub := newHub(t, 3, a.URL, b.URL)
+	hub, _ := newHub(t, 3, a.URL, b.URL)
 
 	resp, body := post(t, hub.URL+"/1", `{broken`)
 	if resp.StatusCode != 400 || !strings.Contains(body, "-32700") {
@@ -212,9 +216,75 @@ func TestClientBadRequestPassesThroughWithoutRetry(t *testing.T) {
 	}
 }
 
+func TestArchiveRouteUsesOnlyArchiveEndpoints(t *testing.T) {
+	archBody := `{"jsonrpc":"2.0","id":1,"result":"0xa"}`
+	arch, ac := upstream(t, okJSON(archBody))
+	full, fc := upstream(t, okJSON(`{"jsonrpc":"2.0","id":1,"result":"0xf"}`))
+	hub, pools := newHub(t, 3, arch.URL, full.URL)
+
+	pl, _ := pools.Get("1")
+	pl.ReportSuccess(arch.URL, 10*time.Millisecond, 100)
+	pl.ReportSuccess(full.URL, 10*time.Millisecond, 100)
+	pl.SetArchive(arch.URL, true)
+	pl.SetArchive(full.URL, false)
+
+	for i := 0; i < 10; i++ {
+		resp, body := post(t, hub.URL+"/1/archive", rpcReq)
+		if resp.StatusCode != 200 || body != archBody {
+			t.Fatalf("archive resp = %d %q", resp.StatusCode, body)
+		}
+	}
+	if fc.hits.Load() != 0 || ac.hits.Load() != 10 {
+		t.Fatalf("hits arch=%d full=%d; archive route must only hit archive endpoints", ac.hits.Load(), fc.hits.Load())
+	}
+
+	// The normal route still balances across everything.
+	if resp, _ := post(t, hub.URL+"/1", rpcReq); resp.StatusCode != 200 {
+		t.Fatalf("normal route broke: %d", resp.StatusCode)
+	}
+}
+
+func TestArchiveRouteWithNoVerifiedArchive503(t *testing.T) {
+	up, c := upstream(t, okJSON(`{"jsonrpc":"2.0","id":1,"result":"0x1"}`))
+	hub, pools := newHub(t, 3, up.URL)
+	pl, _ := pools.Get("1")
+	pl.ReportSuccess(up.URL, time.Millisecond, 100) // healthy, but archive-unknown
+
+	resp, body := post(t, hub.URL+"/1/archive", rpcReq)
+	if resp.StatusCode != 503 || !strings.Contains(body, "archive") {
+		t.Fatalf("resp = %d %q, want 503 archive message", resp.StatusCode, body)
+	}
+	if c.hits.Load() != 0 {
+		t.Fatal("archive-unknown endpoints must not receive archive traffic")
+	}
+}
+
+func TestSolanaArchiveIs404(t *testing.T) {
+	up, _ := upstream(t, okJSON(`{}`))
+	hub, _ := newHub(t, 3, up.URL)
+	resp, body := post(t, hub.URL+"/solana/archive", `{"jsonrpc":"2.0","id":1,"method":"getSlot"}`)
+	if resp.StatusCode != 404 || !strings.Contains(body, "EVM-only") {
+		t.Fatalf("resp = %d %q, want 404 EVM-only message", resp.StatusCode, body)
+	}
+}
+
+func TestArchiveHint(t *testing.T) {
+	up, _ := upstream(t, okJSON(`{}`))
+	hub, _ := newHub(t, 3, up.URL)
+	resp, err := http.Get(hub.URL + "/1/archive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusMethodNotAllowed || !strings.Contains(string(b), "/1/archive") {
+		t.Fatalf("GET /1/archive = %d %q", resp.StatusCode, b)
+	}
+}
+
 func TestUnknownChain404(t *testing.T) {
 	up, _ := upstream(t, okJSON(`{}`))
-	hub := newHub(t, 3, up.URL)
+	hub, _ := newHub(t, 3, up.URL)
 	resp, body := post(t, hub.URL+"/137", rpcReq)
 	if resp.StatusCode != 404 || !strings.Contains(body, "unknown chain") {
 		t.Fatalf("resp = %d %q", resp.StatusCode, body)
@@ -223,7 +293,7 @@ func TestUnknownChain404(t *testing.T) {
 
 func TestMethodHintAndPreflight(t *testing.T) {
 	up, _ := upstream(t, okJSON(`{}`))
-	hub := newHub(t, 3, up.URL)
+	hub, _ := newHub(t, 3, up.URL)
 
 	resp, err := http.Get(hub.URL + "/1")
 	if err != nil {

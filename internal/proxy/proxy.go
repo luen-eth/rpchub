@@ -36,10 +36,25 @@ type Handler struct {
 
 // Proxy handles "POST /{chain}".
 func (h *Handler) Proxy(w http.ResponseWriter, r *http.Request) {
+	h.proxy(w, r, false)
+}
+
+// ProxyArchive handles "POST /{chain}/archive": same forwarding machinery,
+// but only endpoints positively verified as archive-capable are eligible.
+func (h *Handler) ProxyArchive(w http.ResponseWriter, r *http.Request) {
+	h.proxy(w, r, true)
+}
+
+func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, archiveOnly bool) {
 	token := r.PathValue("chain")
 	ch, ok := h.Reg.Resolve(token)
 	if !ok {
 		writeRPCError(w, http.StatusNotFound, fmt.Sprintf("rpchub: unknown chain %q; see GET /chains", token))
+		return
+	}
+	if archiveOnly && ch.Kind != registry.KindEVM {
+		writeRPCError(w, http.StatusNotFound,
+			fmt.Sprintf("rpchub: no archive pool for %s (archive detection is EVM-only)", ch.Key))
 		return
 	}
 	pl, ok := h.Pools.Get(ch.Key)
@@ -62,7 +77,7 @@ func (h *Handler) Proxy(w http.ResponseWriter, r *http.Request) {
 	var last *upstreamResult
 	var lastURL, lastErr string
 	for attempt := 0; attempt < h.MaxRetries; attempt++ {
-		u, ok := pl.Pick(tried)
+		u, ok := pl.Pick(tried, archiveOnly)
 		if !ok {
 			break
 		}
@@ -92,13 +107,22 @@ func (h *Handler) Proxy(w http.ResponseWriter, r *http.Request) {
 
 	if last != nil { // retries exhausted: the last upstream answer beats a generic 502
 		h.write(w, last, lastURL)
-		h.Log.Warn("proxy exhausted retries", "chain", ch.Key, "status", last.status, "attempts", len(tried))
+		h.Log.Warn("proxy exhausted retries", "chain", ch.Key, "archive", archiveOnly, "status", last.status, "attempts", len(tried))
+		return
+	}
+	if len(tried) == 0 {
+		msg := fmt.Sprintf("rpchub: no healthy upstream for chain %s", ch.Key)
+		if archiveOnly {
+			msg = fmt.Sprintf("rpchub: no archive-capable upstream known for chain %s yet; detection runs with health probes, see GET /%s/health", ch.Key, ch.Key)
+		}
+		h.Log.Warn("proxy has no eligible upstream", "chain", ch.Key, "archive", archiveOnly)
+		writeRPCError(w, http.StatusServiceUnavailable, msg)
 		return
 	}
 	if lastErr == "" {
 		lastErr = "no healthy upstream"
 	}
-	h.Log.Warn("proxy failed", "chain", ch.Key, "err", lastErr, "attempts", len(tried))
+	h.Log.Warn("proxy failed", "chain", ch.Key, "archive", archiveOnly, "err", lastErr, "attempts", len(tried))
 	writeRPCError(w, http.StatusBadGateway, fmt.Sprintf("rpchub: all upstreams failed for chain %s: %s", ch.Key, lastErr))
 }
 
@@ -121,6 +145,22 @@ func (h *Handler) MethodHint(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusMethodNotAllowed)
 	json.NewEncoder(w).Encode(map[string]string{
 		"error": fmt.Sprintf("send JSON-RPC via POST /%s; endpoint health at GET /%s/health", ch.Key, ch.Key),
+	})
+}
+
+// ArchiveHint handles "GET /{chain}/archive" with a friendly pointer.
+func (h *Handler) ArchiveHint(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("chain")
+	ch, ok := h.Reg.Resolve(token)
+	if !ok {
+		writeRPCError(w, http.StatusNotFound, fmt.Sprintf("rpchub: unknown chain %q; see GET /chains", token))
+		return
+	}
+	setCORS(w)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusMethodNotAllowed)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error": fmt.Sprintf("send JSON-RPC via POST /%s/archive; endpoint health at GET /%s/health", ch.Key, ch.Key),
 	})
 }
 

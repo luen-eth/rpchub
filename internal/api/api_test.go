@@ -29,6 +29,7 @@ func newAPI(t *testing.T, started time.Time, markHealthy bool) *httptest.Server 
 	pl.SetEndpoints(ch.Endpoints)
 	if markHealthy {
 		pl.ReportSuccess(ch.Endpoints[0], 42*time.Millisecond, 1000)
+		pl.SetArchive(ch.Endpoints[0], true)
 	}
 
 	s := &Server{Reg: reg, Pools: pools, Started: started}
@@ -65,6 +66,9 @@ func TestChains(t *testing.T) {
 	}
 	if out[0]["chain"] != "1" || out[0]["healthy"] != float64(1) || out[0]["height"] != float64(1000) {
 		t.Fatalf("chain info = %v", out[0])
+	}
+	if out[0]["archive_healthy"] != float64(1) {
+		t.Fatalf("archive_healthy = %v, want 1", out[0]["archive_healthy"])
 	}
 }
 

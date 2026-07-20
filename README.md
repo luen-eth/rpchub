@@ -8,6 +8,7 @@ POST http://localhost:9563/ethereum   # same chain, by slug
 POST http://localhost:9563/56         # BNB Smart Chain
 POST http://localhost:9563/bnb        # short names work too
 POST http://localhost:9563/solana     # exception: served from a static list
+POST http://localhost:9563/1/archive  # archive-verified upstreams only
 ```
 
 ## Why
@@ -18,6 +19,7 @@ Public RPCs from chainlist are individually unreliable — some are dead, some r
 - **Health:** every endpoint is probed periodically (EVM: `eth_blockNumber`, Solana: `getSlot`). Chain identity is verified on first contact (`eth_chainId` / `getGenesisHash`) — an endpoint answering for a different chain is excluded permanently. Endpoints more than `MAX_BLOCK_LAG` behind the pool median are pulled out of rotation (stale-data guard).
 - **Selection & failover:** power-of-two-choices among healthy endpoints (two random candidates, the lower-latency one wins). Timeouts, connection errors, 429/5xx and non-JSON bodies fail over to the next endpoint (`MAX_RETRIES` attempts). JSON-RPC-level errors are the upstream's own answer and pass through verbatim. An endpoint that keeps failing enters an exponential cooldown.
 - **Solana exception:** chainlist is EVM-only, so `/solana` is served from a built-in public list plus `SOLANA_RPCS` (mainnet-beta only; the genesis hash is verified).
+- **Archive detection:** every healthy EVM endpoint is periodically asked for `eth_getBalance(0x0, block 0x1)` — a pruned node fails with a state error, an archive node answers. The verdict is refreshed hourly, because public endpoints often sit behind load balancers mixing archive and pruned nodes. `POST /{chain}/archive` routes **only** to endpoints positively verified as archive-capable; undetermined ones never receive archive traffic.
 
 ## Quick start
 
@@ -49,7 +51,8 @@ See [.env.example](.env.example) for every knob. The ones that matter most:
 | Endpoint | Description |
 |---|---|
 | `POST /{chain}` | JSON-RPC proxy. `{chain}` = chain id, slug, short name or alias. Batch requests supported. |
-| `GET /chains` | Enabled chains, their tokens, healthy/total endpoint counts and the reference height. |
+| `POST /{chain}/archive` | The same proxy, but restricted to endpoints verified as archive-capable. For deep `eth_getLogs`, historical `eth_call` / `eth_getBalance` and similar. Returns 503 until an archive endpoint has been discovered; not available for Solana (404). |
+| `GET /chains` | Enabled chains, their tokens, healthy/archive/total endpoint counts and the reference height. |
 | `GET /health` | 200 when every chain has ≥1 healthy endpoint; `warming` during boot warm-up; 503 otherwise. |
 | `GET /{chain}/health` | Per-endpoint status/latency/height (URL paths are redacted so API keys cannot leak). |
 
@@ -65,4 +68,4 @@ On Dokploy: add the repo as a Dockerfile application, set the env vars in the pa
 
 - No WebSocket/subscription proxying (`wss://` entries are filtered out anyway).
 - No client auth, client rate-limiting or response caching.
-- Deep `eth_getLogs` / `trace_*` calls may fail on some public RPCs; failover compensates partially, but there is no archive-node guarantee.
+- The `/archive` pool is bounded by the archive endpoints that can actually be detected: some chains have very few public archive RPCs, in which case the route honestly returns 503. Non-standard methods such as `trace_*` and `debug_*` may be disabled even on an archive node, and that upstream error passes through unchanged.

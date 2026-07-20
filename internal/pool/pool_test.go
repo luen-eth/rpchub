@@ -21,7 +21,7 @@ func newTestPool(lag uint64, urls ...string) (*Pool, *fakeClock) {
 
 func TestColdStartFallback(t *testing.T) {
 	p, _ := newTestPool(10, "https://a", "https://b")
-	if _, ok := p.Pick(nil); !ok {
+	if _, ok := p.Pick(nil, false); !ok {
 		t.Fatal("cold pool must still serve unproven endpoints")
 	}
 }
@@ -33,7 +33,7 @@ func TestBreakerTripAndRecover(t *testing.T) {
 	for i := 0; i < failThreshold; i++ {
 		p.ReportFailure("https://a", "boom")
 	}
-	if _, ok := p.Pick(nil); ok {
+	if _, ok := p.Pick(nil, false); ok {
 		t.Fatal("tripped endpoint must not be picked")
 	}
 	if s := p.Snapshot(true); s.Endpoints[0].Status != "cooldown" {
@@ -43,11 +43,11 @@ func TestBreakerTripAndRecover(t *testing.T) {
 	// Cooldown expires, but the endpoint was proven before (height>0): only a
 	// probe success brings it back — no traffic fallback to known-bad.
 	clk.advance(2 * baseCooldown)
-	if _, ok := p.Pick(nil); ok {
+	if _, ok := p.Pick(nil, false); ok {
 		t.Fatal("expired cooldown alone must not restore traffic")
 	}
 	p.ReportSuccess("https://a", 50*time.Millisecond, 101)
-	if url, ok := p.Pick(nil); !ok || url != "https://a" {
+	if url, ok := p.Pick(nil, false); !ok || url != "https://a" {
 		t.Fatalf("Pick after recovery = %q, %v", url, ok)
 	}
 }
@@ -75,7 +75,7 @@ func TestP2CPrefersLowerLatency(t *testing.T) {
 	p.ReportSuccess("https://slow", 500*time.Millisecond, 100)
 	p.ReportSuccess("https://fast", 10*time.Millisecond, 100)
 	for i := 0; i < 10; i++ {
-		if url, _ := p.Pick(nil); url != "https://fast" {
+		if url, _ := p.Pick(nil, false); url != "https://fast" {
 			t.Fatalf("Pick = %q, want https://fast", url)
 		}
 	}
@@ -90,7 +90,7 @@ func TestLaggingExcludedViaMedian(t *testing.T) {
 	p.ReportSuccess("https://liar", 10*time.Millisecond, 999999999)
 
 	for i := 0; i < 30; i++ {
-		url, ok := p.Pick(nil)
+		url, ok := p.Pick(nil, false)
 		if !ok || url == "https://stale" {
 			t.Fatalf("Pick = %q, %v; stale endpoint must be excluded", url, ok)
 		}
@@ -102,7 +102,7 @@ func TestLaggingExcludedViaMedian(t *testing.T) {
 	// Lagging endpoints are not even a fallback: with everything else
 	// excluded, Pick must fail rather than serve stale data.
 	exclude := map[string]bool{"https://a": true, "https://b": true, "https://liar": true}
-	if url, ok := p.Pick(exclude); ok {
+	if url, ok := p.Pick(exclude, false); ok {
 		t.Fatalf("Pick = %q; lagging endpoint served as fallback", url)
 	}
 }
@@ -111,7 +111,7 @@ func TestWrongChainPermanentlyExcluded(t *testing.T) {
 	p, _ := newTestPool(10, "https://a", "https://b")
 	p.MarkWrongChain("https://a", "chainId 56 != 1")
 	for i := 0; i < 10; i++ {
-		if url, _ := p.Pick(nil); url != "https://b" {
+		if url, _ := p.Pick(nil, false); url != "https://b" {
 			t.Fatalf("Pick = %q, want https://b", url)
 		}
 	}
@@ -142,6 +142,62 @@ func TestSetEndpointsPreservesState(t *testing.T) {
 	}
 	if !p.NeedsVerify("https://new") || p.NeedsVerify("https://a") {
 		t.Fatal("verify flags wrong after SetEndpoints")
+	}
+}
+
+func TestArchivePickServesOnlyVerifiedArchive(t *testing.T) {
+	p, _ := newTestPool(10, "https://arch", "https://full", "https://mystery")
+	for _, u := range []string{"https://arch", "https://full", "https://mystery"} {
+		p.ReportSuccess(u, 10*time.Millisecond, 100)
+	}
+	p.SetArchive("https://arch", true)
+	p.SetArchive("https://full", false)
+	// "mystery" stays unknown: must never be served on the archive path
+
+	for i := 0; i < 20; i++ {
+		if url, ok := p.Pick(nil, true); !ok || url != "https://arch" {
+			t.Fatalf("archive Pick = %q, %v; want only https://arch", url, ok)
+		}
+	}
+	if _, ok := p.Pick(map[string]bool{"https://arch": true}, true); ok {
+		t.Fatal("non-archive endpoints must not serve archive traffic")
+	}
+	// Normal path still serves non-archive endpoints.
+	if u, ok := p.Pick(map[string]bool{"https://arch": true}, false); !ok || u == "https://arch" {
+		t.Fatalf("normal Pick without arch = %q, %v; want a non-archive endpoint", u, ok)
+	}
+
+	s := p.Snapshot(true)
+	if s.ArchiveHealthy != 1 {
+		t.Fatalf("ArchiveHealthy = %d, want 1", s.ArchiveHealthy)
+	}
+	if s.Endpoints[0].Archive == nil || !*s.Endpoints[0].Archive {
+		t.Fatalf("arch snapshot = %+v", s.Endpoints[0])
+	}
+	if s.Endpoints[1].Archive == nil || *s.Endpoints[1].Archive {
+		t.Fatalf("full snapshot = %+v", s.Endpoints[1])
+	}
+	if s.Endpoints[2].Archive != nil {
+		t.Fatalf("mystery snapshot = %+v", s.Endpoints[2])
+	}
+}
+
+func TestNeedsArchiveCheckRecheckCycle(t *testing.T) {
+	p, clk := newTestPool(10, "https://a")
+	if !p.NeedsArchiveCheck("https://a") {
+		t.Fatal("fresh endpoint must need an archive check")
+	}
+	p.SetArchive("https://a", true)
+	if p.NeedsArchiveCheck("https://a") {
+		t.Fatal("just-checked endpoint must not need a recheck")
+	}
+	clk.advance(archiveRecheck + time.Second)
+	if !p.NeedsArchiveCheck("https://a") {
+		t.Fatal("verdict older than archiveRecheck must be rechecked")
+	}
+	p.MarkWrongChain("https://a", "nope")
+	if p.NeedsArchiveCheck("https://a") {
+		t.Fatal("wrong-chain endpoints must never be archive-checked")
 	}
 }
 

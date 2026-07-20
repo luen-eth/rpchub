@@ -17,7 +17,7 @@ const DefaultChainlistURL = "https://chainlist.org/rpcs.json"
 const SolanaKey = "solana"
 
 // reservedTokens can never be used as chain path tokens or aliases.
-var reservedTokens = map[string]bool{"health": true, "chains": true, "metrics": true}
+var reservedTokens = map[string]bool{"health": true, "chains": true, "metrics": true, "archive": true}
 
 type Config struct {
 	Port            int

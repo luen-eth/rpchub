@@ -26,13 +26,15 @@ const (
 type Prober struct {
 	pool     *pool.Pool
 	adapter  Adapter
+	archive  ArchiveProber // nil when the chain kind has no archive concept
 	client   *http.Client
 	interval time.Duration
 	log      *slog.Logger
 }
 
 func NewProber(pl *pool.Pool, ad Adapter, client *http.Client, interval time.Duration, log *slog.Logger) *Prober {
-	return &Prober{pool: pl, adapter: ad, client: client, interval: interval, log: log}
+	arch, _ := ad.(ArchiveProber)
+	return &Prober{pool: pl, adapter: ad, archive: arch, client: client, interval: interval, log: log}
 }
 
 // Run sweeps immediately, then on every tick until ctx is done.
@@ -103,6 +105,26 @@ func (p *Prober) probeOne(ctx context.Context, u string) {
 	p.pool.ReportSuccess(u, dur, height)
 	p.log.Debug("probe ok", "chain", p.pool.Key(), "endpoint", registry.RedactURL(u),
 		"latency_ms", dur.Milliseconds(), "height", height)
+
+	if p.archive != nil && p.pool.NeedsArchiveCheck(u) {
+		p.checkArchive(ctx, u)
+	}
+}
+
+// checkArchive runs the archive-capability probe on a currently healthy
+// endpoint. Transport or garbage failures leave the verdict undecided (the
+// next sweep retries); only definitive answers are recorded.
+func (p *Prober) checkArchive(ctx context.Context, u string) {
+	body, _, err := p.post(ctx, u, p.archive.ArchiveRequest())
+	if err != nil {
+		return
+	}
+	isArchive, err := p.archive.InterpretArchive(body)
+	if err != nil {
+		return
+	}
+	p.pool.SetArchive(u, isArchive)
+	p.log.Debug("archive check", "chain", p.pool.Key(), "endpoint", registry.RedactURL(u), "archive", isArchive)
 }
 
 func (p *Prober) post(ctx context.Context, u string, payload []byte) ([]byte, time.Duration, error) {
