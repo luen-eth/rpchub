@@ -115,6 +115,56 @@ func TestProbeHTTPErrorAndRPCError(t *testing.T) {
 	}
 }
 
+func TestSolanaAdapterParsing(t *testing.T) {
+	s := Solana{}
+	if h, err := s.ParseHeight([]byte(`{"jsonrpc":"2.0","id":1,"result":250000000}`)); err != nil || h != 250000000 {
+		t.Errorf("ParseHeight = %d, %v", h, err)
+	}
+	if _, err := s.ParseHeight([]byte(`{"result":"not-a-slot"}`)); err == nil {
+		t.Error("string slot must error")
+	}
+	if match, err := s.VerifyIdentity([]byte(`{"result":"` + solanaMainnetGenesis + `"}`)); err != nil || !match {
+		t.Errorf("mainnet genesis: match=%v err=%v", match, err)
+	}
+	// devnet genesis hash must be a confirmed mismatch, not a transient error
+	if match, err := s.VerifyIdentity([]byte(`{"result":"EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"}`)); err != nil || match {
+		t.Errorf("devnet genesis: match=%v err=%v", match, err)
+	}
+	if s.LagLimit(10) != 200 {
+		t.Errorf("LagLimit(10) = %d", s.LagLimit(10))
+	}
+}
+
+func TestSolanaProbeEndToEnd(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Method string `json:"method"`
+		}
+		json.Unmarshal(body, &req)
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "getGenesisHash":
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"` + solanaMainnetGenesis + `"}`))
+		case "getSlot":
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":250000000}`))
+		default:
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"nope"}}`))
+		}
+	}))
+	defer srv.Close()
+
+	pl := pool.New("solana", 200)
+	pl.SetEndpoints([]string{srv.URL})
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	NewProber(pl, Solana{}, &http.Client{}, time.Minute, log).Sweep(context.Background())
+
+	ep := pl.Snapshot(true).Endpoints[0]
+	if ep.Status != "healthy" || ep.Height != 250000000 {
+		t.Fatalf("endpoint = %+v", ep)
+	}
+}
+
 func TestEVMAdapterParsing(t *testing.T) {
 	e := EVM{ChainID: 56}
 	if h, err := e.ParseHeight([]byte(`{"result":"0x1b4"}`)); err != nil || h != 436 {

@@ -55,7 +55,7 @@ func run() error {
 		FilterTracking: cfg.FilterTracking,
 		ExtraRPCs:      cfg.ExtraRPCs,
 		Aliases:        cfg.Aliases,
-		SolanaEnabled:  false, // wired in the solana step
+		SolanaEnabled:  cfg.SolanaEnabled,
 		SolanaRPCs:     cfg.SolanaRPCs,
 	}
 
@@ -161,5 +161,8 @@ func refreshLoop(ctx context.Context, cfg *config.Config, client *http.Client, r
 }
 
 func adapterFor(ch *registry.Chain) health.Adapter {
+	if ch.Kind == registry.KindSolana {
+		return health.Solana{}
+	}
 	return health.EVM{ChainID: ch.ChainID}
 }
