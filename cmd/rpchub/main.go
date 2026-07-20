@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"rpchub/internal/api"
 	"rpchub/internal/config"
 	"rpchub/internal/health"
 	"rpchub/internal/pool"
@@ -99,14 +99,16 @@ func run() error {
 		Log:        log,
 	}
 
+	apiS := &api.Server{Reg: reg, Pools: pools, Started: time.Now()}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /{chain}", proxyH.Proxy)
 	mux.HandleFunc("OPTIONS /{chain}", proxyH.Options)
 	mux.HandleFunc("GET /{chain}", proxyH.MethodHint)
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "starting"})
-	})
+	mux.HandleFunc("GET /{chain}/health", apiS.ChainHealth)
+	mux.HandleFunc("GET /chains", apiS.Chains)
+	mux.HandleFunc("GET /health", apiS.Health)
+	mux.HandleFunc("GET /", apiS.Root)
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
