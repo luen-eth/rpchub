@@ -17,7 +17,7 @@ func fixtureEntries() []ChainEntry {
 	return []ChainEntry{
 		{Name: "Ethereum Mainnet", ChainID: 1, ChainSlug: "ethereum", ShortName: "eth", RPC: []RPCEntry{
 			{URL: "https://eth-rpc.example", Tracking: "none"},
-			{URL: "​https://zw.example"},          // zero-width prefix (seen live)
+			{URL: "​https://zw.example"},               // zero-width prefix (seen live)
 			{URL: "https://key.example/v2/${API_KEY}"}, // placeholder
 			{URL: "wss://ws.example"},                  // websocket
 			{URL: "rpcWorking"},                        // garbage (seen live)
