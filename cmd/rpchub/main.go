@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"rpchub/internal/config"
+	"rpchub/internal/health"
+	"rpchub/internal/pool"
+	"rpchub/internal/registry"
 )
 
 func main() {
@@ -35,6 +38,57 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	client := &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 4,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+			ForceAttemptHTTP2:   true,
+		},
+	}
+
+	opts := registry.BuildOptions{
+		ChainIDs:       cfg.ChainIDs,
+		AllowHTTP:      cfg.AllowHTTP,
+		FilterTracking: cfg.FilterTracking,
+		ExtraRPCs:      cfg.ExtraRPCs,
+		Aliases:        cfg.Aliases,
+		SolanaEnabled:  false, // wired in the solana step
+		SolanaRPCs:     cfg.SolanaRPCs,
+	}
+
+	reg := registry.New()
+	var entries []registry.ChainEntry
+	if len(cfg.ChainIDs) > 0 {
+		if entries, err = registry.LoadSource(ctx, client, cfg.ChainlistURL, cfg.CacheDir, log); err != nil {
+			return err
+		}
+	}
+	if err := reg.Update(entries, opts); err != nil {
+		return err
+	}
+
+	pools := pool.NewSet()
+	syncPools := func() {
+		for _, ch := range reg.Chains() {
+			ad := adapterFor(ch)
+			pl := pools.Ensure(ch.Key, ad.LagLimit(cfg.MaxBlockLag))
+			pl.SetEndpoints(ch.Endpoints)
+		}
+	}
+	syncPools()
+
+	for _, ch := range reg.Chains() {
+		pl, _ := pools.Get(ch.Key)
+		log.Info("chain enabled", "chain", ch.Key, "name", ch.Name, "kind", ch.Kind.String(), "endpoints", len(ch.Endpoints))
+		go health.NewProber(pl, adapterFor(ch), client, cfg.ProbeInterval, log).Run(ctx)
+	}
+
+	if len(cfg.ChainIDs) > 0 {
+		go refreshLoop(ctx, cfg, client, reg, opts, syncPools, log)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -48,7 +102,7 @@ func run() error {
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("rpchub listening", "port", cfg.Port, "evm_chains", len(cfg.ChainIDs), "solana", cfg.SolanaEnabled)
+		log.Info("rpchub listening", "port", cfg.Port, "chains", len(reg.Chains()))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -63,4 +117,36 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// refreshLoop refetches the chainlist periodically so new public RPCs join
+// the pools (and removed ones leave) without a restart.
+func refreshLoop(ctx context.Context, cfg *config.Config, client *http.Client, reg *registry.Registry, opts registry.BuildOptions, syncPools func(), log *slog.Logger) {
+	t := time.NewTicker(cfg.RefreshInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		entries, raw, err := registry.FetchChainlist(ctx, client, cfg.ChainlistURL)
+		if err != nil {
+			log.Warn("chainlist refresh failed, keeping current endpoints", "err", err)
+			continue
+		}
+		if err := registry.SaveCache(cfg.CacheDir, raw); err != nil {
+			log.Warn("chainlist cache write failed", "err", err)
+		}
+		if err := reg.Update(entries, opts); err != nil {
+			log.Warn("chainlist refresh rejected, keeping current endpoints", "err", err)
+			continue
+		}
+		syncPools()
+		log.Info("chainlist refreshed", "chains", len(reg.Chains()))
+	}
+}
+
+func adapterFor(ch *registry.Chain) health.Adapter {
+	return health.EVM{ChainID: ch.ChainID}
 }

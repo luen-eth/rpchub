@@ -6,6 +6,19 @@ import (
 	"unicode"
 )
 
+// RedactURL hides the path of an RPC URL for logs and the ops API: some
+// endpoints (including user EXTRA_RPCS) embed API keys in the path.
+func RedactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "invalid-url"
+	}
+	if u.Path == "" || u.Path == "/" {
+		return u.Scheme + "://" + u.Host
+	}
+	return u.Scheme + "://" + u.Host + "/…"
+}
+
 // CleanURL normalizes a raw RPC URL from chainlist. The live data contains
 // zero-width characters, ${API_KEY} placeholders, wss:// endpoints and plain
 // garbage ("rpcWorking", bare hostnames), all of which are rejected here.
