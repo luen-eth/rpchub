@@ -2,6 +2,12 @@
 
 > Unified RPC proxy backed by chainlist: set chain IDs in env, get one stable JSON-RPC endpoint per chain.
 
+<p>
+  <img src="https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white" alt="Go 1.22+">
+  <img src="https://img.shields.io/badge/deps-stdlib%20only-2ea44f" alt="stdlib only">
+  <img src="https://img.shields.io/badge/deploy-Docker%20%7C%20Dokploy-2496ED?logo=docker&logoColor=white" alt="Docker / Dokploy">
+</p>
+
 ```
 POST http://localhost:9563/1          # Ethereum, by chain id
 POST http://localhost:9563/ethereum   # same chain, by slug
@@ -9,6 +15,27 @@ POST http://localhost:9563/56         # BNB Smart Chain
 POST http://localhost:9563/bnb        # short names work too
 POST http://localhost:9563/solana     # exception: served from a static list
 POST http://localhost:9563/1/archive  # archive-verified upstreams only
+```
+
+### Highlights
+
+- 🔗 **One endpoint per chain** — write `CHAIN_IDS=1,56` and let chainlist supply the rest.
+- 🧭 **Smart routing** — health probes, latency-aware P2C selection, automatic failover, circuit breaker.
+- 🕰️ **Stale-data guard** — nodes lagging behind the pool median are pulled out of rotation.
+- 🗄️ **Archive pool** — `/{chain}/archive` only ever routes to verified archive nodes.
+- ◎ **Solana exception** — chainlist is EVM-only, so `/solana` runs off a built-in list.
+- 📦 **Single static binary**, no dependencies, ready for Docker/Dokploy.
+
+```mermaid
+flowchart LR
+  C["Client / bot"] -->|POST /1| H["rpchub :9563"]
+  subgraph rpchub
+    H --> R["registry<br/>(chainlist + cache)"]
+    H --> P["pool<br/>(health, P2C, breaker)"]
+  end
+  P -->|best healthy endpoint| U1["public RPC #1"]
+  P -.->|failover| U2["public RPC #2"]
+  P -.->|failover| U3["public RPC #N"]
 ```
 
 ## Why
