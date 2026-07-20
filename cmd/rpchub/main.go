@@ -17,6 +17,7 @@ import (
 	"rpchub/internal/config"
 	"rpchub/internal/health"
 	"rpchub/internal/pool"
+	"rpchub/internal/proxy"
 	"rpchub/internal/registry"
 )
 
@@ -89,7 +90,19 @@ func run() error {
 		go refreshLoop(ctx, cfg, client, reg, opts, syncPools, log)
 	}
 
+	proxyH := &proxy.Handler{
+		Reg:        reg,
+		Pools:      pools,
+		Client:     client,
+		MaxRetries: cfg.MaxRetries,
+		Timeout:    cfg.RequestTimeout,
+		Log:        log,
+	}
+
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /{chain}", proxyH.Proxy)
+	mux.HandleFunc("OPTIONS /{chain}", proxyH.Options)
+	mux.HandleFunc("GET /{chain}", proxyH.MethodHint)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "starting"})

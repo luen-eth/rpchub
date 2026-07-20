@@ -3,12 +3,10 @@ package health
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"sync"
 	"time"
 
@@ -133,12 +131,4 @@ func (p *Prober) post(ctx context.Context, u string, payload []byte) ([]byte, ti
 	return body, dur, nil
 }
 
-// errString renders an error without leaking full endpoint URLs (which can
-// embed API keys) into pool state or logs.
-func errString(err error) string {
-	var ue *url.Error
-	if errors.As(err, &ue) {
-		return fmt.Sprintf("%s %s: %v", ue.Op, registry.RedactURL(ue.URL), ue.Err)
-	}
-	return err.Error()
-}
+func errString(err error) string { return registry.ErrString(err) }

@@ -1,10 +1,22 @@
 package registry
 
 import (
+	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"unicode"
 )
+
+// ErrString renders an error without leaking full endpoint URLs (which can
+// embed API keys) into pool state, logs or client-facing messages.
+func ErrString(err error) string {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return fmt.Sprintf("%s %s: %v", ue.Op, RedactURL(ue.URL), ue.Err)
+	}
+	return err.Error()
+}
 
 // RedactURL hides the path of an RPC URL for logs and the ops API: some
 // endpoints (including user EXTRA_RPCS) embed API keys in the path.
