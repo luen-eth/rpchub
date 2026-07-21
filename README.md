@@ -6,6 +6,7 @@
   <img src="https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white" alt="Go 1.22+">
   <img src="https://img.shields.io/badge/deps-stdlib%20only-2ea44f" alt="stdlib only">
   <img src="https://img.shields.io/badge/deploy-Docker%20%7C%20Dokploy-2496ED?logo=docker&logoColor=white" alt="Docker / Dokploy">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0">
 </p>
 
 ```
@@ -96,3 +97,9 @@ On Dokploy: add the repo as a Dockerfile application, set the env vars in the pa
 - No WebSocket/subscription proxying (`wss://` entries are filtered out anyway).
 - No client auth, client rate-limiting or response caching.
 - The `/archive` pool is bounded by the archive endpoints that can actually be detected: some chains have very few public archive RPCs, in which case the route honestly returns 503. Non-standard methods such as `trace_*` and `debug_*` may be disabled even on an archive node, and that upstream error passes through unchanged.
+
+## License
+
+[Apache-2.0](LICENSE) © luen-eth
+
+RPC endpoints are derived from [chainlist.org](https://chainlist.org) data; rpchub only reads and health-checks that list.
