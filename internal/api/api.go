@@ -19,6 +19,7 @@ const warmupGrace = 90 * time.Second
 type Server struct {
 	Reg     *registry.Registry
 	Pools   *pool.Set
+	WSPools *pool.Set // nil when WS_ENABLED is off
 	Started time.Time
 }
 
@@ -30,7 +31,9 @@ type chainInfo struct {
 	Tokens         []string `json:"tokens,omitempty"`
 	Healthy        int      `json:"healthy"`
 	ArchiveHealthy int      `json:"archive_healthy"`
+	WSHealthy      int      `json:"ws_healthy"`
 	Total          int      `json:"total"`
+	WSTotal        int      `json:"ws_total"`
 	Height         uint64   `json:"height,omitempty"`
 }
 
@@ -43,6 +46,12 @@ func (s *Server) Chains(w http.ResponseWriter, _ *http.Request) {
 			continue
 		}
 		snap := pl.Snapshot(false)
+		var wsSnap pool.Snapshot
+		if s.WSPools != nil {
+			if wsPl, ok := s.WSPools.Get(ch.Key); ok {
+				wsSnap = wsPl.Snapshot(false)
+			}
+		}
 		out = append(out, chainInfo{
 			Chain:          ch.Key,
 			ChainID:        ch.ChainID,
@@ -51,7 +60,9 @@ func (s *Server) Chains(w http.ResponseWriter, _ *http.Request) {
 			Tokens:         s.Reg.Tokens(ch.Key),
 			Healthy:        snap.Healthy,
 			ArchiveHealthy: snap.ArchiveHealthy,
+			WSHealthy:      wsSnap.Healthy,
 			Total:          snap.Total,
+			WSTotal:        wsSnap.Total,
 			Height:         snap.RefHeight,
 		})
 	}
@@ -88,6 +99,13 @@ func (s *Server) Health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, code, body)
 }
 
+// chainHealth is the per-chain health document: the HTTP pool inline, with
+// the WebSocket pool nested when the chain has one.
+type chainHealth struct {
+	pool.Snapshot
+	WebSocket *pool.Snapshot `json:"websocket,omitempty"`
+}
+
 // ChainHealth handles GET /{chain}/health with per-endpoint scores. Endpoint
 // URLs are redacted (host only): chainlist and EXTRA_RPCS URLs can embed API
 // keys in their paths.
@@ -107,7 +125,17 @@ func (s *Server) ChainHealth(w http.ResponseWriter, r *http.Request) {
 	for i := range snap.Endpoints {
 		snap.Endpoints[i].URL = registry.RedactURL(snap.Endpoints[i].URL)
 	}
-	writeJSON(w, http.StatusOK, snap)
+	out := chainHealth{Snapshot: snap}
+	if s.WSPools != nil {
+		if wsPl, ok := s.WSPools.Get(ch.Key); ok {
+			ws := wsPl.Snapshot(true)
+			for i := range ws.Endpoints {
+				ws.Endpoints[i].URL = registry.RedactURL(ws.Endpoints[i].URL)
+			}
+			out.WebSocket = &ws
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // Root handles GET / with a short service description; anything else under

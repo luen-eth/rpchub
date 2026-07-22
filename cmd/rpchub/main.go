@@ -107,12 +107,29 @@ func run() error {
 		Log:        log,
 	}
 
+	var wsH *proxy.WSHandler
 	apiS := &api.Server{Reg: reg, Pools: pools, Started: time.Now()}
+	if cfg.WSEnabled {
+		wsH = &proxy.WSHandler{
+			Reg:     reg,
+			Pools:   wsPools,
+			Retries: cfg.MaxRetries,
+			Timeout: cfg.RequestTimeout,
+			Max:     cfg.MaxWSConns,
+			Log:     log,
+		}
+		apiS.WSPools = wsPools
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /{chain}", proxyH.Proxy)
 	mux.HandleFunc("OPTIONS /{chain}", proxyH.Options)
-	mux.HandleFunc("GET /{chain}", proxyH.MethodHint)
+	mux.HandleFunc("GET /{chain}", proxy.GetHandler(proxyH, wsH))
+	if cfg.WSEnabled {
+		mux.HandleFunc("GET /{chain}/ws", wsH.HandleExplicit)
+	} else {
+		mux.HandleFunc("GET /{chain}/ws", proxy.Disabled)
+	}
 	mux.HandleFunc("POST /{chain}/archive", proxyH.ProxyArchive)
 	mux.HandleFunc("OPTIONS /{chain}/archive", proxyH.Options)
 	mux.HandleFunc("GET /{chain}/archive", proxyH.ArchiveHint)
