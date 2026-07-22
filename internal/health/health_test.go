@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"rpchub/internal/pool"
+	"rpchub/internal/wstest"
 )
 
 // evmServer answers eth_chainId with the given id and eth_blockNumber with height.
@@ -161,6 +162,53 @@ func TestArchiveDetection(t *testing.T) {
 	}
 	if s.ArchiveHealthy != 1 || s.Healthy != 2 {
 		t.Fatalf("snapshot = healthy %d, archive_healthy %d", s.Healthy, s.ArchiveHealthy)
+	}
+}
+
+func TestWSProberScoresEndpoints(t *testing.T) {
+	good := wstest.NewRPCServer(t, map[string]string{
+		"eth_chainId":     `"0x1"`,
+		"eth_blockNumber": `"0x64"`,
+	})
+	wrongChain := wstest.NewRPCServer(t, map[string]string{
+		"eth_chainId":     `"0x38"`, // BSC answering on the ethereum pool
+		"eth_blockNumber": `"0x64"`,
+	})
+	dead := wstest.NewRejectingServer(t, http.StatusBadGateway)
+
+	pl := pool.New("1", 10)
+	pl.SetEndpoints([]string{wstest.URL(good), wstest.URL(wrongChain), wstest.URL(dead)})
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	NewWSProber(pl, EVM{ChainID: 1}, time.Minute, log).Sweep(context.Background())
+
+	s := pl.Snapshot(true)
+	if s.Endpoints[0].Status != "healthy" || s.Endpoints[0].Height != 100 {
+		t.Errorf("good ws endpoint = %+v", s.Endpoints[0])
+	}
+	if s.Endpoints[1].Status != "wrong_chain" {
+		t.Errorf("wrong-chain ws endpoint = %+v", s.Endpoints[1])
+	}
+	if s.Endpoints[2].Status == "healthy" || s.Endpoints[2].TotalFail != 1 {
+		t.Errorf("dead ws endpoint = %+v", s.Endpoints[2])
+	}
+	// The archive probe is HTTP-only; ws endpoints must stay undetermined.
+	if s.Endpoints[0].Archive != nil {
+		t.Errorf("ws endpoint got an archive verdict: %v", *s.Endpoints[0].Archive)
+	}
+}
+
+func TestWSProberSolana(t *testing.T) {
+	srv := wstest.NewRPCServer(t, map[string]string{
+		"getGenesisHash": `"` + solanaMainnetGenesis + `"`,
+		"getSlot":        `250000000`,
+	})
+	pl := pool.New("solana", 200)
+	pl.SetEndpoints([]string{wstest.URL(srv)})
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	NewWSProber(pl, Solana{}, time.Minute, log).Sweep(context.Background())
+
+	if ep := pl.Snapshot(true).Endpoints[0]; ep.Status != "healthy" || ep.Height != 250000000 {
+		t.Fatalf("solana ws endpoint = %+v", ep)
 	}
 }
 

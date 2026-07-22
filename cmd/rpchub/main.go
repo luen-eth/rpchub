@@ -57,6 +57,7 @@ func run() error {
 		Aliases:        cfg.Aliases,
 		SolanaEnabled:  cfg.SolanaEnabled,
 		SolanaRPCs:     cfg.SolanaRPCs,
+		WSEnabled:      cfg.WSEnabled,
 	}
 
 	reg := registry.New()
@@ -71,19 +72,26 @@ func run() error {
 	}
 
 	pools := pool.NewSet()
+	wsPools := pool.NewSet() // WebSocket endpoints are scored separately
 	syncPools := func() {
 		for _, ch := range reg.Chains() {
-			ad := adapterFor(ch)
-			pl := pools.Ensure(ch.Key, ad.LagLimit(cfg.MaxBlockLag))
-			pl.SetEndpoints(ch.Endpoints)
+			lag := adapterFor(ch).LagLimit(cfg.MaxBlockLag)
+			pools.Ensure(ch.Key, lag).SetEndpoints(ch.Endpoints)
+			if cfg.WSEnabled {
+				wsPools.Ensure(ch.Key, lag).SetEndpoints(ch.WSEndpoints)
+			}
 		}
 	}
 	syncPools()
 
 	for _, ch := range reg.Chains() {
 		pl, _ := pools.Get(ch.Key)
-		log.Info("chain enabled", "chain", ch.Key, "name", ch.Name, "kind", ch.Kind.String(), "endpoints", len(ch.Endpoints))
+		log.Info("chain enabled", "chain", ch.Key, "name", ch.Name, "kind", ch.Kind.String(),
+			"endpoints", len(ch.Endpoints), "ws_endpoints", len(ch.WSEndpoints))
 		go health.NewProber(pl, adapterFor(ch), client, cfg.ProbeInterval, log).Run(ctx)
+		if wsPl, ok := wsPools.Get(ch.Key); ok && len(ch.WSEndpoints) > 0 {
+			go health.NewWSProber(wsPl, adapterFor(ch), cfg.ProbeInterval, log).Run(ctx)
+		}
 	}
 
 	if len(cfg.ChainIDs) > 0 {
