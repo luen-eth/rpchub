@@ -17,7 +17,7 @@ const DefaultChainlistURL = "https://chainlist.org/rpcs.json"
 const SolanaKey = "solana"
 
 // reservedTokens can never be used as chain path tokens or aliases.
-var reservedTokens = map[string]bool{"health": true, "chains": true, "metrics": true, "archive": true}
+var reservedTokens = map[string]bool{"health": true, "chains": true, "metrics": true, "archive": true, "ws": true}
 
 type Config struct {
 	Port            int
@@ -33,6 +33,8 @@ type Config struct {
 	MaxBlockLag     uint64
 	FilterTracking  bool
 	AllowHTTP       bool
+	WSEnabled       bool
+	MaxWSConns      int
 	CacheDir        string
 	ChainlistURL    string
 	LogLevel        slog.Level
@@ -56,6 +58,8 @@ func Load(environ []string) (*Config, error) {
 		RequestTimeout:  15 * time.Second,
 		MaxRetries:      3,
 		MaxBlockLag:     10,
+		WSEnabled:       true,
+		MaxWSConns:      256,
 		CacheDir:        "./data",
 		ChainlistURL:    DefaultChainlistURL,
 		LogLevel:        slog.LevelInfo,
@@ -121,6 +125,15 @@ func Load(environ []string) (*Config, error) {
 	}
 	if cfg.AllowHTTP, err = boolVal(env, "ALLOW_HTTP", false); err != nil {
 		return nil, err
+	}
+	if cfg.WSEnabled, err = boolVal(env, "WS_ENABLED", cfg.WSEnabled); err != nil {
+		return nil, err
+	}
+	if cfg.MaxWSConns, err = intVal(env, "MAX_WS_CONNS", cfg.MaxWSConns); err != nil {
+		return nil, err
+	}
+	if cfg.MaxWSConns < 1 {
+		return nil, fmt.Errorf("MAX_WS_CONNS: must be >= 1")
 	}
 	if v := env["CACHE_DIR"]; v != "" {
 		cfg.CacheDir = v

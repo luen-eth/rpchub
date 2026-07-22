@@ -35,9 +35,15 @@ var DefaultSolanaRPCs = []string{
 }
 
 // reservedTokens are path segments used by rpchub's own API.
-var reservedTokens = map[string]bool{"health": true, "chains": true, "metrics": true, "archive": true}
+var reservedTokens = map[string]bool{"health": true, "chains": true, "metrics": true, "archive": true, "ws": true}
 
-// Chain is one proxied chain with its sanitized endpoint list.
+// DefaultSolanaWSRPCs mirrors DefaultSolanaRPCs for the subscription path.
+var DefaultSolanaWSRPCs = []string{
+	"wss://api.mainnet-beta.solana.com",
+	"wss://solana-rpc.publicnode.com",
+}
+
+// Chain is one proxied chain with its sanitized endpoint lists.
 type Chain struct {
 	Key       string // canonical path token: decimal chain id, or "solana"
 	ChainID   int64  // 0 for Solana
@@ -45,18 +51,22 @@ type Chain struct {
 	Name      string
 	Slug      string
 	ShortName string
-	Endpoints []string // sanitized and deduped, user extras first
+	Endpoints []string // http(s), sanitized and deduped, user extras first
+	// WSEndpoints holds ws(s) endpoints for the subscription path. It may be
+	// empty: plenty of chains publish no public WebSocket at all.
+	WSEndpoints []string
 }
 
 // BuildOptions selects and shapes the chains exposed by the registry.
 type BuildOptions struct {
 	ChainIDs       []int64
-	AllowHTTP      bool
+	AllowHTTP      bool                // also admit plaintext http:// and ws://
 	FilterTracking bool                // keep only tracking == "none" chainlist entries
 	ExtraRPCs      map[string][]string // chain key -> user RPCs, highest priority
 	Aliases        map[string]string   // extra token -> chain key
 	SolanaEnabled  bool
 	SolanaRPCs     []string
+	WSEnabled      bool // collect ws(s) endpoints for the subscription path
 }
 
 // Registry resolves path tokens to chains. Update swaps the whole state
@@ -101,13 +111,13 @@ func (r *Registry) Update(entries []ChainEntry, opt BuildOptions) error {
 		}
 		seen := map[string]bool{}
 		for _, raw := range opt.ExtraRPCs[key] {
-			addEndpoint(ch, seen, raw, true) // user's own nodes: http allowed
+			addEndpoint(ch, seen, raw, true, opt.WSEnabled) // user's own nodes: plaintext allowed
 		}
 		for _, rpc := range entry.RPC {
 			if opt.FilterTracking && rpc.Tracking != "none" {
 				continue
 			}
-			addEndpoint(ch, seen, rpc.URL, opt.AllowHTTP)
+			addEndpoint(ch, seen, rpc.URL, opt.AllowHTTP, opt.WSEnabled)
 		}
 		if len(ch.Endpoints) == 0 {
 			return fmt.Errorf("chain %s (%s): no usable RPC endpoints after filtering", key, entry.Name)
@@ -121,9 +131,13 @@ func (r *Registry) Update(entries []ChainEntry, opt BuildOptions) error {
 	if opt.SolanaEnabled {
 		ch := &Chain{Key: SolanaKey, Kind: KindSolana, Name: "Solana Mainnet", Slug: SolanaKey, ShortName: "sol"}
 		seen := map[string]bool{}
-		for _, group := range [][]string{opt.ExtraRPCs[SolanaKey], opt.SolanaRPCs, DefaultSolanaRPCs} {
+		groups := [][]string{opt.ExtraRPCs[SolanaKey], opt.SolanaRPCs, DefaultSolanaRPCs}
+		if opt.WSEnabled {
+			groups = append(groups, DefaultSolanaWSRPCs)
+		}
+		for _, group := range groups {
 			for _, raw := range group {
-				addEndpoint(ch, seen, raw, true)
+				addEndpoint(ch, seen, raw, true, opt.WSEnabled)
 			}
 		}
 		if len(ch.Endpoints) == 0 {
@@ -207,12 +221,22 @@ func (r *Registry) Tokens(key string) []string {
 	return out
 }
 
-func addEndpoint(ch *Chain, seen map[string]bool, raw string, allowHTTP bool) {
-	u, ok := CleanURL(raw, allowHTTP)
-	if !ok || seen[u] {
+// addEndpoint sanitizes raw and files it under the HTTP or the WebSocket list.
+// allowPlaintext is true for user-supplied nodes (their own LAN address is
+// their business) and follows ALLOW_HTTP for chainlist entries.
+func addEndpoint(ch *Chain, seen map[string]bool, raw string, allowPlaintext, wsEnabled bool) {
+	u, transport := ClassifyURL(raw, allowPlaintext)
+	if transport == TransportNone || seen[u] {
+		return
+	}
+	if transport == TransportWS && !wsEnabled {
 		return
 	}
 	seen[u] = true
+	if transport == TransportWS {
+		ch.WSEndpoints = append(ch.WSEndpoints, u)
+		return
+	}
 	ch.Endpoints = append(ch.Endpoints, u)
 }
 

@@ -26,6 +26,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.MaxRetries != 3 || cfg.MaxBlockLag != 10 {
 		t.Errorf("retries/lag = %d/%d", cfg.MaxRetries, cfg.MaxBlockLag)
 	}
+	if !cfg.WSEnabled || cfg.MaxWSConns != 256 {
+		t.Errorf("ws defaults = %v/%d, want true/256", cfg.WSEnabled, cfg.MaxWSConns)
+	}
 	if cfg.ChainlistURL != DefaultChainlistURL {
 		t.Errorf("ChainlistURL = %q", cfg.ChainlistURL)
 	}
@@ -89,7 +92,10 @@ func TestLoadErrors(t *testing.T) {
 		{"CHAIN_IDS=56", "ALIASES=99:56"},      // numeric alias
 		{"CHAIN_IDS=56", "ALIASES=health:56"},  // reserved
 		{"CHAIN_IDS=56", "ALIASES=archive:56"}, // reserved
-		{"CHAIN_IDS=56", "ALIASES=bsc=56"},     // bad separator
+		{"CHAIN_IDS=56", "ALIASES=ws:56"},      // reserved
+		{"CHAIN_IDS=1", "MAX_WS_CONNS=0"},
+		{"CHAIN_IDS=1", "WS_ENABLED=maybe"},
+		{"CHAIN_IDS=56", "ALIASES=bsc=56"}, // bad separator
 		{"CHAIN_IDS=1", "PORT=99999"},
 	}
 	for _, environ := range cases {

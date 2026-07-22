@@ -102,6 +102,95 @@ func TestUpdateSanitizesAndIndexes(t *testing.T) {
 	}
 }
 
+func TestClassifyURL(t *testing.T) {
+	cases := []struct {
+		in             string
+		allowPlaintext bool
+		wantURL        string
+		wantTransport  Transport
+	}{
+		{"https://a.example/", false, "https://a.example", TransportHTTP},
+		{"wss://a.example/ws/", false, "wss://a.example/ws", TransportWS},
+		{"WSS://A.example", false, "wss://a.example", TransportWS},
+		{"ws://a.example", false, "", TransportNone}, // plaintext, off by default
+		{"ws://a.example", true, "ws://a.example", TransportWS},
+		{"http://a.example", true, "http://a.example", TransportHTTP},
+		{"wss://a.example/${KEY}", false, "", TransportNone},
+		{"rpcWorking", true, "", TransportNone},
+	}
+	for _, c := range cases {
+		gotURL, gotTransport := ClassifyURL(c.in, c.allowPlaintext)
+		if gotURL != c.wantURL || gotTransport != c.wantTransport {
+			t.Errorf("ClassifyURL(%q, %v) = (%q, %v), want (%q, %v)",
+				c.in, c.allowPlaintext, gotURL, gotTransport, c.wantURL, c.wantTransport)
+		}
+	}
+}
+
+func TestUpdateCollectsWebSocketEndpoints(t *testing.T) {
+	entries := []ChainEntry{{
+		Name: "Ethereum Mainnet", ChainID: 1, ChainSlug: "ethereum", ShortName: "eth",
+		RPC: []RPCEntry{
+			{URL: "https://eth-rpc.example"},
+			{URL: "wss://eth-ws.example"},
+			{URL: "wss://eth-ws.example/"}, // dupe after normalize
+			{URL: "ws://plain-ws.example"}, // plaintext, dropped by default
+		},
+	}}
+
+	r := New()
+	if err := r.Update(entries, BuildOptions{ChainIDs: []int64{1}, WSEnabled: true,
+		ExtraRPCs: map[string][]string{"1": {"ws://my-node.local:8546"}}}); err != nil {
+		t.Fatal(err)
+	}
+	ch, _ := r.Resolve("1")
+	if !reflect.DeepEqual(ch.Endpoints, []string{"https://eth-rpc.example"}) {
+		t.Errorf("http endpoints = %v", ch.Endpoints)
+	}
+	// The user's own ws:// node is trusted; chainlist's plaintext one is not.
+	if !reflect.DeepEqual(ch.WSEndpoints, []string{"ws://my-node.local:8546", "wss://eth-ws.example"}) {
+		t.Errorf("ws endpoints = %v", ch.WSEndpoints)
+	}
+
+	// WSEnabled=false keeps the ws endpoints out entirely.
+	r2 := New()
+	if err := r2.Update(entries, BuildOptions{ChainIDs: []int64{1}}); err != nil {
+		t.Fatal(err)
+	}
+	ch2, _ := r2.Resolve("1")
+	if len(ch2.WSEndpoints) != 0 {
+		t.Errorf("ws endpoints with WSEnabled=false: %v", ch2.WSEndpoints)
+	}
+
+	// ALLOW_HTTP admits chainlist's plaintext ws:// too.
+	r3 := New()
+	if err := r3.Update(entries, BuildOptions{ChainIDs: []int64{1}, WSEnabled: true, AllowHTTP: true}); err != nil {
+		t.Fatal(err)
+	}
+	ch3, _ := r3.Resolve("1")
+	if len(ch3.WSEndpoints) != 2 {
+		t.Errorf("ws endpoints with AllowHTTP: %v", ch3.WSEndpoints)
+	}
+}
+
+func TestUpdateSolanaWebSocket(t *testing.T) {
+	r := New()
+	if err := r.Update(nil, BuildOptions{SolanaEnabled: true, WSEnabled: true,
+		SolanaRPCs: []string{"wss://user-sol.example"}}); err != nil {
+		t.Fatal(err)
+	}
+	ch, _ := r.Resolve("solana")
+	if ch.WSEndpoints[0] != "wss://user-sol.example" {
+		t.Errorf("user ws endpoint should come first: %v", ch.WSEndpoints)
+	}
+	if len(ch.WSEndpoints) != 1+len(DefaultSolanaWSRPCs) {
+		t.Errorf("solana ws defaults missing: %v", ch.WSEndpoints)
+	}
+	if len(ch.Endpoints) != len(DefaultSolanaRPCs) {
+		t.Errorf("http endpoints polluted by ws: %v", ch.Endpoints)
+	}
+}
+
 func TestUpdateFilterTracking(t *testing.T) {
 	r := New()
 	if err := r.Update(fixtureEntries(), BuildOptions{ChainIDs: []int64{1}, FilterTracking: true}); err != nil {
