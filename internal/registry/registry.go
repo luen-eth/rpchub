@@ -35,7 +35,7 @@ var DefaultSolanaRPCs = []string{
 }
 
 // reservedTokens are path segments used by rpchub's own API.
-var reservedTokens = map[string]bool{"health": true, "chains": true, "metrics": true, "archive": true, "ws": true}
+var reservedTokens = map[string]bool{"health": true, "chains": true, "metrics": true, "archive": true, "ws": true, "indexer": true}
 
 // DefaultSolanaWSRPCs mirrors DefaultSolanaRPCs for the subscription path.
 var DefaultSolanaWSRPCs = []string{

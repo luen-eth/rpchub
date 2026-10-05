@@ -1,0 +1,19 @@
+{
+  "name": "rpchub-ponder-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "ponder start",
+    "codegen": "ponder codegen"
+  },
+  "dependencies": {
+    "ponder": "0.17.12",
+    "viem": "2.57.2",
+    "hono": "4.13.12"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/node": "22.18.6"
+  },
+  "packageManager": "pnpm@11.25.0"
+}

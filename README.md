@@ -16,6 +16,7 @@ POST http://localhost:9563/56         # BNB Smart Chain
 POST http://localhost:9563/bnb        # short names work too
 POST http://localhost:9563/solana     # exception: served from a static list
 POST http://localhost:9563/1/archive  # archive-verified upstreams only
+POST http://localhost:9563/1/indexer  # Ponder-compatible, sticky EVM source
 ws://localhost:9563/1                 # subscriptions (eth_subscribe, logs, …)
 ws://localhost:9563/solana            # slotSubscribe, accountSubscribe, …
 ```
@@ -48,7 +49,7 @@ Public RPCs from chainlist are individually unreliable — some are dead, some r
 
 - **Source:** `https://chainlist.org/rpcs.json` is fetched at boot, refreshed every `REFRESH_INTERVAL`, and cached on disk so the service still starts when chainlist is unreachable. URLs are aggressively sanitized: `${API_KEY}` placeholders, garbage records and invisible characters are all dropped, and each surviving entry is sorted into the HTTP or the WebSocket pool by scheme.
 - **Health:** every endpoint is probed periodically (EVM: `eth_blockNumber`, Solana: `getSlot`). Chain identity is verified on first contact (`eth_chainId` / `getGenesisHash`) — an endpoint answering for a different chain is excluded permanently. Endpoints more than `MAX_BLOCK_LAG` behind the pool median are pulled out of rotation (stale-data guard).
-- **Selection & failover:** power-of-two-choices among healthy endpoints (two random candidates, the lower-latency one wins). Timeouts, connection errors, 429/5xx and non-JSON bodies fail over to the next endpoint (`MAX_RETRIES` attempts). JSON-RPC-level errors are the upstream's own answer and pass through verbatim. An endpoint that keeps failing enters an exponential cooldown.
+- **Selection & failover:** power-of-two-choices among healthy endpoints (two random candidates, the lower-latency one wins). Timeouts, connection errors, 429/5xx and non-JSON bodies fail over to the next endpoint (`MAX_RETRIES` attempts within one `REQUEST_TIMEOUT` budget). Known provider restrictions, quota errors and transient JSON-RPC failures trigger failover for allowlisted read methods. Contract reverts, invalid parameters and unknown client methods retain their RPC errors. Chain identity must be verified before serving traffic. An endpoint that keeps failing enters an exponential cooldown.
 - **Solana exception:** chainlist is EVM-only, so `/solana` is served from a built-in public list plus `SOLANA_RPCS` (mainnet-beta only; the genesis hash is verified).
 - **WebSocket:** chainlist's `wss://` entries form a second pool per chain, probed and scored exactly like the HTTP one. Connecting a WebSocket client to `ws://host/{chain}` (or `/{chain}/ws`) picks a healthy upstream and relays the connection, so `eth_subscribe`, `logsSubscribe` and Solana's `slotSubscribe` work through the same URL as ordinary requests.
 - **Archive detection:** every healthy EVM endpoint is periodically asked for `eth_getBalance(0x0, block 0x1)` — a pruned node fails with a state error, an archive node answers. The verdict is refreshed hourly, because public endpoints often sit behind load balancers mixing archive and pruned nodes. `POST /{chain}/archive` routes **only** to endpoints positively verified as archive-capable; undetermined ones never receive archive traffic.
@@ -89,11 +90,34 @@ See [.env.example](.env.example) for every knob. The ones that matter most:
 |---|---|
 | `POST /{chain}` | JSON-RPC proxy. `{chain}` = chain id, slug, short name or alias. Batch requests supported. |
 | `POST /{chain}/archive` | The same proxy, but restricted to endpoints verified as archive-capable. For deep `eth_getLogs`, historical `eth_call` / `eth_getBalance` and similar. Returns 503 until an archive endpoint has been discovered; not available for Solana (404). |
+| `POST /{chain}/indexer` | EVM read-only route for Ponder. Requires fresh capability probes, keeps a preferred provider and validates head continuity before failover. Unsupported chains return 404. |
+| `GET /{chain}/indexer/health` | Eligible provider count, preferred host, accepted head and consistency waiting reason. This is RPC health, not proof that an indexer is caught up. |
 | `GET /{chain}` *(with `Upgrade: websocket`)* | Relays the connection to a healthy `wss://` upstream for subscriptions. A plain GET returns a usage hint instead. |
 | `GET /{chain}/ws` | Same relay on an explicit path, for clients that prefer one. |
 | `GET /chains` | Enabled chains, their tokens, healthy/archive/ws/total endpoint counts and the reference height. |
 | `GET /health` | 200 when every chain has ≥1 healthy endpoint; `warming` during boot warm-up; 503 otherwise. |
 | `GET /{chain}/health` | Per-endpoint status/latency/height (URL paths are redacted so API keys cannot leak). |
+
+## Ponder indexing
+
+Configure Ponder with this route, rather than the general load-balanced endpoint:
+
+```ts
+chains: {
+  ethereum: { id: 1, rpc: `${process.env.RPCHUB_URL}/1/indexer` },
+  bnb: { id: 56, rpc: `${process.env.RPCHUB_URL}/56/indexer` },
+}
+```
+
+The HTTP prober verifies full transaction blocks, `eth_getLogs` with a block hash and a numeric range, and block lookup by hash. Capability verdicts expire after 10 minutes. Successful providers renew after 4–6 minutes, spread by endpoint across multiple sweeps; the previous verdict remains usable during renewal until its original expiry. A failed check excludes the provider immediately and gets another check after 30–60 seconds. Neither renewal nor basic health probes clear method restrictions or 30-second quota cooldowns. The probe checks a one-block range; it does not certify arbitrary historical ranges or archive state.
+
+The indexer route sticks to a preferred provider. A backup must share the accepted head or demonstrate a fork with a second hostname and an observed common ancestor within 64 blocks. A stale backup is refused instead of returning an older `latest`. If there is no verified source, reads return retryable HTTP 502/503. This is a consistency guard, not blockchain consensus: different hosts may share an underlying provider. Consistency history is held in memory and resets when RPCHub restarts.
+
+Real reorgs and Ponder crash recovery can replay unfinalized blocks. Preserve Ponder's durable database/checkpoints; use Postgres for a production indexer. Monitor the indexer's actual block lag and time since progress separately from RPCHub `/health` and Ponder `/ready`. Free RPC availability and quotas cannot provide an uninterrupted-service guarantee.
+
+For independent Ethereum and BNB indexing, run one Ponder process per chain with a separate schema/database. A shared, globally ordered Ponder application can replay a large portion of the faster chain when recovering from the slower chain's safe checkpoint. Separate processes keep recovery within each chain's own checkpoint window; they still replay unfinalized blocks and handle real reorgs. The [single-chain example](examples/ponder/README.md) configures this without experimental ordering or disabling reorg protection. Use a shared application only if your handlers require cross-chain ordering.
+
+Batch responses retain successful entries and retry only failed, allowlisted reads with IDs. Writes and notifications are never automatically replayed; a write interrupted during transport has an uncertain outcome, returned as an RPC error. Mixed batches use HTTP 200 with per-item errors to avoid encouraging clients to resend completed writes. All-read batches with unresolved entries use HTTP 502/503; clients should retry only the failed entries.
 
 ## Deployment (Docker / Dokploy)
 

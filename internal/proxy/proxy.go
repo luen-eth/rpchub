@@ -1,7 +1,5 @@
-// Package proxy forwards JSON-RPC requests (single or batch, treated as an
-// opaque body) to the best endpoint of a chain's pool, failing over to other
-// endpoints on transport-level errors, 429/5xx and non-JSON responses.
-// JSON-RPC-level errors are the upstream's answer and pass through verbatim.
+// Package proxy forwards validated JSON-RPC requests with provider-aware
+// failover for safe reads and a consistent, capability-verified indexer route.
 package proxy
 
 import (
@@ -14,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"rpchub/internal/pool"
@@ -26,35 +25,37 @@ const (
 )
 
 type Handler struct {
-	Reg        *registry.Registry
-	Pools      *pool.Set
-	Client     *http.Client
-	MaxRetries int
-	Timeout    time.Duration
-	Log        *slog.Logger
+	Reg         *registry.Registry
+	Pools       *pool.Set
+	Client      *http.Client
+	MaxRetries  int
+	Timeout     time.Duration
+	Log         *slog.Logger
+	indexMu     sync.Mutex
+	indexStates map[string]*indexState
 }
 
 // Proxy handles "POST /{chain}".
 func (h *Handler) Proxy(w http.ResponseWriter, r *http.Request) {
-	h.proxy(w, r, false)
+	h.proxy(w, r, false, false)
 }
 
 // ProxyArchive handles "POST /{chain}/archive": same forwarding machinery,
 // but only endpoints positively verified as archive-capable are eligible.
 func (h *Handler) ProxyArchive(w http.ResponseWriter, r *http.Request) {
-	h.proxy(w, r, true)
+	h.proxy(w, r, true, false)
 }
 
-func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, archiveOnly bool) {
+func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, archiveOnly, indexer bool) {
 	token := r.PathValue("chain")
 	ch, ok := h.Reg.Resolve(token)
 	if !ok {
 		writeRPCError(w, http.StatusNotFound, fmt.Sprintf("rpchub: unknown chain %q; see GET /chains", token))
 		return
 	}
-	if archiveOnly && ch.Kind != registry.KindEVM {
+	if (archiveOnly || indexer) && ch.Kind != registry.KindEVM {
 		writeRPCError(w, http.StatusNotFound,
-			fmt.Sprintf("rpchub: no archive pool for %s (archive detection is EVM-only)", ch.Key))
+			fmt.Sprintf("rpchub: archive/indexer routes are EVM-only (%s)", ch.Key))
 		return
 	}
 	pl, ok := h.Pools.Get(ch.Key)
@@ -73,57 +74,7 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, archiveOnly bool
 		return
 	}
 
-	tried := make(map[string]bool, h.MaxRetries)
-	var last *upstreamResult
-	var lastURL, lastErr string
-	for attempt := 0; attempt < h.MaxRetries; attempt++ {
-		u, ok := pl.Pick(tried, archiveOnly)
-		if !ok {
-			break
-		}
-		tried[u] = true
-		res, err := h.forward(r.Context(), u, body)
-		if err != nil {
-			pl.ReportFailure(u, registry.ErrString(err))
-			lastErr = registry.ErrString(err)
-			if r.Context().Err() != nil {
-				return // client is gone; nothing sensible to write
-			}
-			continue
-		}
-		if res.retryable() {
-			pl.ReportFailure(u, fmt.Sprintf("HTTP %d", res.status))
-			last, lastURL = res, u
-			continue
-		}
-		if res.status < 300 {
-			pl.ReportSuccess(u, res.dur, 0)
-		}
-		h.write(w, res, u)
-		h.Log.Debug("proxied", "chain", ch.Key, "upstream", registry.RedactURL(u),
-			"status", res.status, "ms", res.dur.Milliseconds(), "attempts", attempt+1)
-		return
-	}
-
-	if last != nil { // retries exhausted: the last upstream answer beats a generic 502
-		h.write(w, last, lastURL)
-		h.Log.Warn("proxy exhausted retries", "chain", ch.Key, "archive", archiveOnly, "status", last.status, "attempts", len(tried))
-		return
-	}
-	if len(tried) == 0 {
-		msg := fmt.Sprintf("rpchub: no healthy upstream for chain %s", ch.Key)
-		if archiveOnly {
-			msg = fmt.Sprintf("rpchub: no archive-capable upstream known for chain %s yet; detection runs with health probes, see GET /%s/health", ch.Key, ch.Key)
-		}
-		h.Log.Warn("proxy has no eligible upstream", "chain", ch.Key, "archive", archiveOnly)
-		writeRPCError(w, http.StatusServiceUnavailable, msg)
-		return
-	}
-	if lastErr == "" {
-		lastErr = "no healthy upstream"
-	}
-	h.Log.Warn("proxy failed", "chain", ch.Key, "archive", archiveOnly, "err", lastErr, "attempts", len(tried))
-	writeRPCError(w, http.StatusBadGateway, fmt.Sprintf("rpchub: all upstreams failed for chain %s: %s", ch.Key, lastErr))
+	h.relay(w, r, pl, body, archiveOnly, indexer)
 }
 
 // Options handles CORS preflight for "OPTIONS /{chain}".
@@ -196,9 +147,12 @@ func (h *Handler) forward(ctx context.Context, u string, body []byte) (*upstream
 		return nil, err
 	}
 	defer resp.Body.Close()
-	rb, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	rb, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(rb) > maxResponseBody {
+		return nil, fmt.Errorf("upstream response exceeds size limit")
 	}
 	return &upstreamResult{status: resp.StatusCode, body: rb, dur: time.Since(start)}, nil
 }
@@ -235,13 +189,6 @@ func writeRPCError(w http.ResponseWriter, httpStatus int, msg string) {
 }
 
 func looksJSON(b []byte) bool {
-	for _, c := range b {
-		switch c {
-		case ' ', '\t', '\r', '\n':
-			continue
-		default:
-			return c == '{' || c == '['
-		}
-	}
-	return false
+	b = bytes.TrimSpace(b)
+	return len(b) > 0 && (b[0] == '{' || b[0] == '[') && json.Valid(b)
 }

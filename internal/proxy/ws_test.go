@@ -38,6 +38,11 @@ func newWSHub(t *testing.T, retries, max int, wsURLs ...string) (*httptest.Serve
 	pools, wsPools := pool.NewSet(), pool.NewSet()
 	pools.Ensure("1", 10).SetEndpoints(ch.Endpoints)
 	wsPools.Ensure("1", 10).SetEndpoints(ch.WSEndpoints)
+	for _, u := range ch.WSEndpoints {
+		pl, _ := wsPools.Get("1")
+		pl.SetVerified(u)
+		pl.ReportSuccess(u, time.Millisecond, 100)
+	}
 	wsPools.Ensure("solana", 200).SetEndpoints(nil)
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -123,10 +128,11 @@ func TestWSRelayFailsOverAtConnectTime(t *testing.T) {
 	hub, wsPools := newWSHub(t, 3, 10, wstest.URL(dead), wstest.URL(limited), wstest.URL(good))
 
 	// Force the pick order: both refusing endpoints look healthy, so they are
-	// tried first, and the good one is only reached as the unproven fallback.
+	// tried first, and the good one is a slower, verified backup.
 	pl, _ := wsPools.Get("1")
 	pl.ReportSuccess(wstest.URL(dead), 5*time.Millisecond, 1000)
 	pl.ReportSuccess(wstest.URL(limited), 5*time.Millisecond, 1000)
+	pl.ReportSuccess(wstest.URL(good), 50*time.Millisecond, 1000)
 
 	got := rpcCall(t, hub.URL, "/1", `{"jsonrpc":"2.0","id":1,"method":"eth_chainId"}`)
 	if !strings.Contains(got, `"0x1"`) {

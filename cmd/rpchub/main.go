@@ -77,6 +77,13 @@ func run() error {
 		for _, ch := range reg.Chains() {
 			lag := adapterFor(ch).LagLimit(cfg.MaxBlockLag)
 			pools.Ensure(ch.Key, lag).SetEndpoints(ch.Endpoints)
+			var priority []string
+			for _, raw := range cfg.ExtraRPCs[ch.Key] {
+				if u, ok := registry.CleanURL(raw, true); ok {
+					priority = append(priority, u)
+				}
+			}
+			pools.Ensure(ch.Key, lag).SetPriority(priority)
 			if cfg.WSEnabled {
 				wsPools.Ensure(ch.Key, lag).SetEndpoints(ch.WSEndpoints)
 			}
@@ -130,6 +137,9 @@ func run() error {
 	} else {
 		mux.HandleFunc("GET /{chain}/ws", proxy.Disabled)
 	}
+	mux.HandleFunc("POST /{chain}/indexer", proxyH.ProxyIndexer)
+	mux.HandleFunc("OPTIONS /{chain}/indexer", proxyH.Options)
+	mux.HandleFunc("GET /{chain}/indexer/health", proxyH.IndexerHealth)
 	mux.HandleFunc("POST /{chain}/archive", proxyH.ProxyArchive)
 	mux.HandleFunc("OPTIONS /{chain}/archive", proxyH.Options)
 	mux.HandleFunc("GET /{chain}/archive", proxyH.ArchiveHint)

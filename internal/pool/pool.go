@@ -46,6 +46,11 @@ type endpoint struct {
 	totalFail     uint64
 	archiveState  uint8
 	archiveAt     time.Time // when archiveState was last decided
+	indexerAt     time.Time
+	indexerOK     bool
+	blocked       map[string]time.Time
+	quotaUntil    time.Time
+	priority      bool
 }
 
 // Pool is the endpoint set for a single chain. All methods are safe for
@@ -214,7 +219,7 @@ func (p *Pool) ReportFailure(url, errMsg string) {
 
 // Pick selects an endpoint, excluding the given URLs (already tried in this
 // request). Preference: healthy non-lagging endpoints via P2C on EMA latency;
-// if none, never-probed endpoints (cold start); known-bad ones are skipped.
+// chain identity must be verified; cold endpoints are never used as fallback.
 // With archiveOnly, only endpoints positively verified as archive-capable
 // qualify — unknowns are never served on the archive path.
 func (p *Pool) Pick(exclude map[string]bool, archiveOnly bool) (string, bool) {
@@ -223,26 +228,28 @@ func (p *Pool) Pick(exclude map[string]bool, archiveOnly bool) (string, bool) {
 	now := p.now()
 	ref := p.heightRefLocked(now)
 
-	var prime, fallback []*endpoint
+	var prime []*endpoint
 	for _, ep := range p.list {
-		if ep.wrongChain || exclude[ep.url] || now.Before(ep.cooldownUntil) {
+		if !ep.verified || ep.wrongChain || exclude[ep.url] || now.Before(ep.cooldownUntil) || now.Before(ep.quotaUntil) {
 			continue
 		}
-		if archiveOnly && ep.archiveState != archiveYes {
+		if archiveOnly && (ep.archiveState != archiveYes || now.Sub(ep.archiveAt) >= archiveRecheck) {
 			continue
 		}
 		switch {
 		case ep.alive && !p.laggingLocked(ep, ref):
 			prime = append(prime, ep)
-		case !ep.alive && ep.height == 0:
-			// Never proven yet: usable as last resort so cold boots serve
-			// traffic before the first probe sweep finishes.
-			fallback = append(fallback, ep)
 		}
 	}
 	cands := prime
-	if len(cands) == 0 {
-		cands = fallback
+	var preferred []*endpoint
+	for _, ep := range cands {
+		if ep.priority {
+			preferred = append(preferred, ep)
+		}
+	}
+	if len(preferred) > 0 {
+		cands = preferred
 	}
 	switch len(cands) {
 	case 0:
@@ -267,7 +274,7 @@ func (p *Pool) Pick(exclude map[string]bool, archiveOnly bool) (string, bool) {
 func (p *Pool) heightRefLocked(now time.Time) uint64 {
 	heights := make([]uint64, 0, len(p.list))
 	for _, ep := range p.list {
-		if ep.alive && !ep.wrongChain && !now.Before(ep.cooldownUntil) && ep.height > 0 {
+		if ep.alive && ep.verified && !ep.wrongChain && !now.Before(ep.cooldownUntil) && !now.Before(ep.quotaUntil) && ep.height > 0 {
 			heights = append(heights, ep.height)
 		}
 	}
@@ -291,16 +298,20 @@ func effEMA(ep *endpoint) float64 {
 
 // EndpointSnapshot is the observable state of one endpoint.
 type EndpointSnapshot struct {
-	URL         string    `json:"url"`
-	Status      string    `json:"status"`            // healthy|lagging|cooldown|unproven|wrong_chain
-	Archive     *bool     `json:"archive,omitempty"` // nil = not determined yet
-	LatencyMS   int       `json:"latency_ms"`
-	Height      uint64    `json:"height,omitempty"`
-	ConsecFails int       `json:"consecutive_fails,omitempty"`
-	LastError   string    `json:"last_error,omitempty"`
-	LastOK      time.Time `json:"last_ok,omitempty"`
-	TotalOK     uint64    `json:"total_ok"`
-	TotalFail   uint64    `json:"total_fail"`
+	URL                 string    `json:"url"`
+	Status              string    `json:"status"`            // healthy|lagging|cooldown|unproven|wrong_chain
+	Archive             *bool     `json:"archive,omitempty"` // nil = not determined yet
+	LatencyMS           int       `json:"latency_ms"`
+	Height              uint64    `json:"height,omitempty"`
+	ConsecFails         int       `json:"consecutive_fails,omitempty"`
+	LastError           string    `json:"last_error,omitempty"`
+	LastOK              time.Time `json:"last_ok,omitempty"`
+	TotalOK             uint64    `json:"total_ok"`
+	TotalFail           uint64    `json:"total_fail"`
+	IndexerReady        bool      `json:"indexer_ready"`
+	IndexerCheckedAt    time.Time `json:"indexer_checked_at,omitempty"`
+	QuotaUntil          time.Time `json:"quota_until,omitempty"`
+	BlockedCapabilities int       `json:"blocked_capabilities"`
 }
 
 // Snapshot is the observable state of a pool.
@@ -309,6 +320,7 @@ type Snapshot struct {
 	RefHeight      uint64             `json:"ref_height,omitempty"`
 	Healthy        int                `json:"healthy"`
 	ArchiveHealthy int                `json:"archive_healthy"`
+	IndexerHealthy int                `json:"indexer_healthy"`
 	Total          int                `json:"total"`
 	Endpoints      []EndpointSnapshot `json:"endpoints,omitempty"`
 }
@@ -327,34 +339,47 @@ func (p *Pool) Snapshot(withEndpoints bool) Snapshot {
 			status = "wrong_chain"
 		case now.Before(ep.cooldownUntil):
 			status = "cooldown"
-		case !ep.alive:
+		case !ep.alive || !ep.verified:
 			status = "unproven"
+		case now.Before(ep.quotaUntil):
+			status = "rate_limited"
 		case p.laggingLocked(ep, ref):
 			status = "lagging"
 		}
 		if status == "healthy" {
 			s.Healthy++
-			if ep.archiveState == archiveYes {
+			if ep.archiveState == archiveYes && now.Sub(ep.archiveAt) < archiveRecheck {
 				s.ArchiveHealthy++
 			}
 		}
+		indexerReady := p.eligibleLocked(ep, "", true) && !p.laggingLocked(ep, ref)
+		if indexerReady {
+			s.IndexerHealthy++
+		}
+		blocked := 0
+		for _, until := range ep.blocked {
+			if now.Before(until) {
+				blocked++
+			}
+		}
 		var arch *bool
-		if ep.archiveState != archiveUnknown {
+		if ep.archiveState != archiveUnknown && now.Sub(ep.archiveAt) < archiveRecheck {
 			v := ep.archiveState == archiveYes
 			arch = &v
 		}
 		if withEndpoints {
 			s.Endpoints = append(s.Endpoints, EndpointSnapshot{
-				URL:         ep.url,
-				Status:      status,
-				Archive:     arch,
-				LatencyMS:   int(ep.emaMS),
-				Height:      ep.height,
-				ConsecFails: ep.consecFails,
-				LastError:   ep.lastErr,
-				LastOK:      ep.lastOK,
-				TotalOK:     ep.totalOK,
-				TotalFail:   ep.totalFail,
+				URL:          ep.url,
+				Status:       status,
+				Archive:      arch,
+				LatencyMS:    int(ep.emaMS),
+				Height:       ep.height,
+				ConsecFails:  ep.consecFails,
+				LastError:    ep.lastErr,
+				LastOK:       ep.lastOK,
+				TotalOK:      ep.totalOK,
+				TotalFail:    ep.totalFail,
+				IndexerReady: indexerReady, IndexerCheckedAt: ep.indexerAt, QuotaUntil: ep.quotaUntil, BlockedCapabilities: blocked,
 			})
 		}
 	}

@@ -64,6 +64,12 @@ func newHub(t *testing.T, retries int, urls ...string) (*httptest.Server, *pool.
 	pools := pool.NewSet()
 	ch, _ := reg.Resolve("1")
 	pools.Ensure("1", 10).SetEndpoints(ch.Endpoints)
+	for _, u := range ch.Endpoints {
+		pl, _ := pools.Get("1")
+		pl.SetVerified(u)
+		pl.ReportSuccess(u, time.Millisecond, 100)
+		pl.SetIndexer(u, true)
+	}
 
 	h := &Handler{
 		Reg:        reg,
@@ -77,6 +83,8 @@ func newHub(t *testing.T, retries int, urls ...string) (*httptest.Server, *pool.
 	mux.HandleFunc("POST /{chain}", h.Proxy)
 	mux.HandleFunc("OPTIONS /{chain}", h.Options)
 	mux.HandleFunc("GET /{chain}", h.MethodHint)
+	mux.HandleFunc("POST /{chain}/indexer", h.ProxyIndexer)
+	mux.HandleFunc("GET /{chain}/indexer/health", h.IndexerHealth)
 	mux.HandleFunc("POST /{chain}/archive", h.ProxyArchive)
 	mux.HandleFunc("OPTIONS /{chain}/archive", h.Options)
 	mux.HandleFunc("GET /{chain}/archive", h.ArchiveHint)
@@ -137,7 +145,7 @@ func TestFailoverAcrossBadUpstreams(t *testing.T) {
 	}
 }
 
-func TestExhaustedReturnsLastUpstreamResponse(t *testing.T) {
+func TestExhaustedReturnsRetryableGatewayError(t *testing.T) {
 	a, _ := upstream(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(503)
 		io.WriteString(w, `{"error":"overloaded"}`)
@@ -149,8 +157,8 @@ func TestExhaustedReturnsLastUpstreamResponse(t *testing.T) {
 	hub, _ := newHub(t, 3, a.URL, b.URL)
 
 	resp, body := post(t, hub.URL+"/1", rpcReq)
-	if resp.StatusCode != 503 || !strings.Contains(body, "overloaded") {
-		t.Fatalf("resp = %d %q, want last upstream 503 passthrough", resp.StatusCode, body)
+	if resp.StatusCode != 502 || !strings.Contains(body, "retry later") {
+		t.Fatalf("resp = %d %q, want retryable gateway error", resp.StatusCode, body)
 	}
 }
 
@@ -196,7 +204,7 @@ func TestBatchPassthrough(t *testing.T) {
 	}
 }
 
-func TestClientBadRequestPassesThroughWithoutRetry(t *testing.T) {
+func TestClientBadRequestRejectedWithoutUpstream(t *testing.T) {
 	a, ca := upstream(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(400)
 		io.WriteString(w, `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}}`)
@@ -211,8 +219,8 @@ func TestClientBadRequestPassesThroughWithoutRetry(t *testing.T) {
 	if resp.StatusCode != 400 || !strings.Contains(body, "-32700") {
 		t.Fatalf("resp = %d %q", resp.StatusCode, body)
 	}
-	if ca.hits.Load()+cb.hits.Load() != 1 {
-		t.Fatalf("hits = %d+%d, want exactly 1 (no retry on client error)", ca.hits.Load(), cb.hits.Load())
+	if ca.hits.Load()+cb.hits.Load() != 0 {
+		t.Fatalf("hits = %d+%d, want zero (locally rejected parse error)", ca.hits.Load(), cb.hits.Load())
 	}
 }
 

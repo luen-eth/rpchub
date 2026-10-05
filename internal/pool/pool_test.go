@@ -16,13 +16,26 @@ func newTestPool(lag uint64, urls ...string) (*Pool, *fakeClock) {
 	p.now = clk.now
 	p.rand = func(int) int { return 0 } // deterministic P2C: compares cands[0] vs cands[1]
 	p.SetEndpoints(urls)
+	for _, u := range urls {
+		p.SetVerified(u)
+		p.ReportSuccess(u, time.Millisecond, 1)
+	}
 	return p, clk
 }
 
-func TestColdStartFallback(t *testing.T) {
-	p, _ := newTestPool(10, "https://a", "https://b")
+func TestColdStartRequiresVerification(t *testing.T) {
+	p := New("1", 10)
+	p.SetEndpoints([]string{"https://a"})
+	if _, ok := p.Pick(nil, false); ok {
+		t.Fatal("unverified endpoints must never receive traffic")
+	}
+	p.ReportSuccess("https://a", time.Millisecond, 100)
+	if _, ok := p.Pick(nil, false); ok {
+		t.Fatal("liveness does not prove chain identity")
+	}
+	p.SetVerified("https://a")
 	if _, ok := p.Pick(nil, false); !ok {
-		t.Fatal("cold pool must still serve unproven endpoints")
+		t.Fatal("verified healthy endpoint should be eligible")
 	}
 }
 
