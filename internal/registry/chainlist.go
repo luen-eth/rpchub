@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // maxChainlistBytes caps the rpcs.json download (currently ~2 MB).
@@ -38,6 +39,8 @@ type ChainEntry struct {
 // FetchChainlist downloads and decodes rpcs.json. It returns the decoded
 // entries plus the raw bytes so callers can cache them.
 func FetchChainlist(ctx context.Context, client *http.Client, url string) ([]ChainEntry, []byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, nil, err

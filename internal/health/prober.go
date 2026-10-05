@@ -131,6 +131,10 @@ func (p *Prober) probeOne(ctx context.Context, u string) {
 	p.log.Debug("probe ok", "chain", p.pool.Key(), "endpoint", registry.RedactURL(u),
 		"latency_ms", dur.Milliseconds(), "height", height)
 
+	if _, evm := p.adapter.(EVM); evm && p.archive != nil && p.pool.NeedsIndexerCheck(u) {
+		p.checkIndexer(ctx, u, height)
+	}
+
 	if p.archive != nil && p.pool.NeedsArchiveCheck(u) {
 		p.checkArchive(ctx, u)
 	}
@@ -175,12 +179,15 @@ func (t httpTransport) roundTrip(ctx context.Context, u string, payload []byte) 
 		return nil, dur, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProbeBody))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProbeBody+1))
 	if err != nil {
 		return nil, dur, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, dur, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	if len(body) > maxProbeBody {
+		return nil, dur, fmt.Errorf("probe response exceeds size limit")
 	}
 	return body, dur, nil
 }

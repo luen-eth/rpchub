@@ -28,6 +28,7 @@ func newAPI(t *testing.T, started time.Time, markHealthy bool) *httptest.Server 
 	pl := pools.Ensure("1", 10)
 	pl.SetEndpoints(ch.Endpoints)
 	if markHealthy {
+		pl.SetVerified(ch.Endpoints[0])
 		pl.ReportSuccess(ch.Endpoints[0], 42*time.Millisecond, 1000)
 		pl.SetArchive(ch.Endpoints[0], true)
 	}
