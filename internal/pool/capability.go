@@ -1,9 +1,26 @@
 package pool
 
-import "time"
+import (
+	"hash/fnv"
+	"time"
+)
 
 // CapabilityTTL bounds trust in public providers' changing plans/backends.
 const CapabilityTTL = 10 * time.Minute
+
+// Leave at least four minutes for the next sweep and its network calls before
+// a positive verdict expires. Spread providers across a two-minute window so
+// one sweep does not have to renew the whole pool at once.
+func indexerRecheckAfter(u string, supported bool) time.Duration {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(u))
+	if !supported {
+		// A transient failed check must not exclude a recovered provider for ten
+		// minutes. It stays ineligible until another complete check succeeds.
+		return 30*time.Second + time.Duration(h.Sum64()%uint64(30*time.Second))
+	}
+	return 4*time.Minute + time.Duration(h.Sum64()%uint64(2*time.Minute))
+}
 
 func (p *Pool) SetPriority(urls []string) {
 	p.mu.Lock()
@@ -22,7 +39,8 @@ func (p *Pool) NeedsIndexerCheck(u string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	ep := p.eps[u]
-	return ep != nil && ep.verified && !ep.wrongChain && p.now().Sub(ep.indexerAt) >= CapabilityTTL && !p.now().Before(ep.quotaUntil)
+	return ep != nil && ep.verified && !ep.wrongChain && !p.now().Before(ep.quotaUntil) &&
+		(ep.indexerAt.IsZero() || p.now().Sub(ep.indexerAt) >= indexerRecheckAfter(u, ep.indexerOK))
 }
 
 func (p *Pool) SetIndexer(u string, ok bool) {

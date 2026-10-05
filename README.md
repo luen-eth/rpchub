@@ -109,11 +109,13 @@ chains: {
 }
 ```
 
-The HTTP prober verifies full transaction blocks, `eth_getLogs` with a block hash and a numeric range, and block lookup by hash. Capability verdicts expire after 10 minutes. Method restrictions and 30-second quota cooldowns survive successful basic health probes. The probe checks a one-block range; it does not certify arbitrary historical ranges or archive state.
+The HTTP prober verifies full transaction blocks, `eth_getLogs` with a block hash and a numeric range, and block lookup by hash. Capability verdicts expire after 10 minutes. Successful providers renew after 4–6 minutes, spread by endpoint across multiple sweeps; the previous verdict remains usable during renewal until its original expiry. A failed check excludes the provider immediately and gets another check after 30–60 seconds. Neither renewal nor basic health probes clear method restrictions or 30-second quota cooldowns. The probe checks a one-block range; it does not certify arbitrary historical ranges or archive state.
 
 The indexer route sticks to a preferred provider. A backup must share the accepted head or demonstrate a fork with a second hostname and an observed common ancestor within 64 blocks. A stale backup is refused instead of returning an older `latest`. If there is no verified source, reads return retryable HTTP 502/503. This is a consistency guard, not blockchain consensus: different hosts may share an underlying provider. Consistency history is held in memory and resets when RPCHub restarts.
 
 Real reorgs and Ponder crash recovery can replay unfinalized blocks. Preserve Ponder's durable database/checkpoints; use Postgres for a production indexer. Monitor the indexer's actual block lag and time since progress separately from RPCHub `/health` and Ponder `/ready`. Free RPC availability and quotas cannot provide an uninterrupted-service guarantee.
+
+For independent Ethereum and BNB indexing, run one Ponder process per chain with a separate schema/database. A shared, globally ordered Ponder application can replay a large portion of the faster chain when recovering from the slower chain's safe checkpoint. Separate processes keep recovery within each chain's own checkpoint window; they still replay unfinalized blocks and handle real reorgs. The [single-chain example](examples/ponder/README.md) configures this without experimental ordering or disabling reorg protection. Use a shared application only if your handlers require cross-chain ordering.
 
 Batch responses retain successful entries and retry only failed, allowlisted reads with IDs. Writes and notifications are never automatically replayed; a write interrupted during transport has an uncertain outcome, returned as an RPC error. Mixed batches use HTTP 200 with per-item errors to avoid encouraging clients to resend completed writes. All-read batches with unresolved entries use HTTP 502/503; clients should retry only the failed entries.
 
