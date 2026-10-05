@@ -165,14 +165,14 @@ func TestRequestBudgetAllowsTimeoutFailover(t *testing.T) {
 }
 func TestOversizedUpstreamResponseFailsOver(t *testing.T) {
 	bad, _ := upstream(t, func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, strings.Repeat(" ", maxResponseBody+1))
+		io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":"0xbad"}`+strings.Repeat(" ", maxResponseBody+1))
 	})
-	good, _ := upstream(t, okJSON(`{"jsonrpc":"2.0","id":1,"result":"0x1"}`))
+	good, c := upstream(t, okJSON(`{"jsonrpc":"2.0","id":1,"result":"0x1"}`))
 	hub, pools := newHub(t, 3, bad.URL, good.URL)
 	pl, _ := pools.Get("1")
 	pl.SetPriority([]string{bad.URL})
-	res, _ := post(t, hub.URL+"/1", rpcReq)
-	if res.StatusCode != 200 {
+	res, body := post(t, hub.URL+"/1", rpcReq)
+	if res.StatusCode != 200 || c.hits.Load() != 1 || strings.Contains(body, "0xbad") {
 		t.Fatal("oversized upstream prevented failover")
 	}
 }
