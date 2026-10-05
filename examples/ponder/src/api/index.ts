@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { sql } from "ponder";
 
 const app = new Hono();
-app.get("/status", async (c) => {
+app.get("/progress", async (c) => {
   const [row] = await db.select({
     blocks: sql<number>`count(*)::int`,
     latestBlock: sql<number>`max(${block.number})`,
