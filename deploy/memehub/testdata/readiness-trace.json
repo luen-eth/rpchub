@@ -1,0 +1,1049 @@
+{
+  "fixtureOnly": true,
+  "source": "actual config() and pair-readiness with installed viem2.55.10; loopback-only guard",
+  "captureScope": "Synthetic manifests and localhost fixture only; no real RPC providers or credentials.",
+  "liveAssumptions": {
+    "routes": 5,
+    "baseSafu": true,
+    "bnbSafu": false,
+    "nativePairsPerChain": 1,
+    "stablecoinsPerChain": 1
+  },
+  "configPollMs": 15000,
+  "readinessCacheMs": 5000,
+  "viem": {
+    "version": "2.55.10",
+    "timeoutMs": 10000,
+    "retryCount": 0,
+    "batchSize": 30,
+    "waitMs": 10
+  },
+  "runs": [
+    {
+      "name": "cold",
+      "httpRequests": 15,
+      "rpcCalls": 23,
+      "maxBatchSize": 5,
+      "perChain": {
+        "base": 8,
+        "bnb": 7
+      },
+      "trace": [
+        {
+          "atMs": 10.0,
+          "stage": "cold",
+          "chain": "base",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_chainId"
+            }
+          ]
+        },
+        {
+          "atMs": 13.92,
+          "stage": "cold",
+          "chain": "bnb",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_chainId"
+            }
+          ]
+        },
+        {
+          "atMs": 24.35,
+          "stage": "cold",
+          "chain": "base",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_getCode",
+              "params": [
+                "0x1111111111111111111111111111111111111111",
+                "latest"
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 26.01,
+          "stage": "cold",
+          "chain": "bnb",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_getCode",
+              "params": [
+                "0x1111111111111111111111111111111111111111",
+                "latest"
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 35.52,
+          "stage": "cold",
+          "chain": "base",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2ae9c600",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "protocolVersion()"
+            }
+          ]
+        },
+        {
+          "atMs": 37.14,
+          "stage": "cold",
+          "chain": "bnb",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2ae9c600",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "protocolVersion()"
+            }
+          ]
+        },
+        {
+          "atMs": 49.45,
+          "stage": "cold",
+          "chain": "base",
+          "batchSize": 5,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000001",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000002",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000003",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000004",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            }
+          ]
+        },
+        {
+          "atMs": 49.72,
+          "stage": "cold",
+          "chain": "bnb",
+          "batchSize": 5,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000001",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000002",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000003",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000004",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            }
+          ]
+        },
+        {
+          "atMs": 60.4,
+          "stage": "cold",
+          "chain": "base",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "latest",
+                false
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 61.17,
+          "stage": "cold",
+          "chain": "bnb",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "latest",
+                false
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 72.09,
+          "stage": "cold",
+          "chain": "base",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x3d0695420000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "0x64"
+              ],
+              "function": "quoteTarget(address)"
+            }
+          ]
+        },
+        {
+          "atMs": 72.2,
+          "stage": "cold",
+          "chain": "bnb",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x3d0695420000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "0x64"
+              ],
+              "function": "quoteTarget(address)"
+            }
+          ]
+        },
+        {
+          "atMs": 82.37,
+          "stage": "cold",
+          "chain": "base",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "0x64",
+                false
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 82.48,
+          "stage": "cold",
+          "chain": "bnb",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "0x64",
+                false
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 93.69,
+          "stage": "cold",
+          "chain": "base",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0xfa8478360000000000000000000000002222222222222222222222222222222222222222",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "stablecoins(address)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "immediate_warm",
+      "httpRequests": 9,
+      "rpcCalls": 17,
+      "maxBatchSize": 5,
+      "perChain": {
+        "base": 5,
+        "bnb": 4
+      },
+      "trace": [
+        {
+          "atMs": 10.0,
+          "stage": "immediate_warm",
+          "chain": "base",
+          "batchSize": 5,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000001",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000002",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000003",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000004",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            }
+          ]
+        },
+        {
+          "atMs": 10.15,
+          "stage": "immediate_warm",
+          "chain": "bnb",
+          "batchSize": 5,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000001",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000002",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000003",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000004",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            }
+          ]
+        },
+        {
+          "atMs": 21.91,
+          "stage": "immediate_warm",
+          "chain": "base",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "latest",
+                false
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 22.03,
+          "stage": "immediate_warm",
+          "chain": "bnb",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "latest",
+                false
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 33.71,
+          "stage": "immediate_warm",
+          "chain": "base",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x3d0695420000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "0x64"
+              ],
+              "function": "quoteTarget(address)"
+            }
+          ]
+        },
+        {
+          "atMs": 33.91,
+          "stage": "immediate_warm",
+          "chain": "bnb",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x3d0695420000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "0x64"
+              ],
+              "function": "quoteTarget(address)"
+            }
+          ]
+        },
+        {
+          "atMs": 45.68,
+          "stage": "immediate_warm",
+          "chain": "base",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "0x64",
+                false
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 45.85,
+          "stage": "immediate_warm",
+          "chain": "bnb",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "0x64",
+                false
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 57.4,
+          "stage": "immediate_warm",
+          "chain": "base",
+          "batchSize": 1,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0xfa8478360000000000000000000000002222222222222222222222222222222222222222",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "stablecoins(address)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "two_concurrent_warm",
+      "httpRequests": 9,
+      "rpcCalls": 34,
+      "maxBatchSize": 10,
+      "perChain": {
+        "base": 5,
+        "bnb": 4
+      },
+      "trace": [
+        {
+          "atMs": 10.0,
+          "stage": "two_concurrent_warm",
+          "chain": "base",
+          "batchSize": 10,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000001",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000002",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000003",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000004",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000001",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000002",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000003",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000004",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            }
+          ]
+        },
+        {
+          "atMs": 10.22,
+          "stage": "two_concurrent_warm",
+          "chain": "bnb",
+          "batchSize": 10,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000001",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000002",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000003",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000004",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000001",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000002",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000003",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x2e5a5b860000000000000000000000000000000000000000000000000000000000000004",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "routeEnabled(uint8)"
+            }
+          ]
+        },
+        {
+          "atMs": 21.08,
+          "stage": "two_concurrent_warm",
+          "chain": "base",
+          "batchSize": 2,
+          "requests": [
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "latest",
+                false
+              ]
+            },
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "latest",
+                false
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 21.2,
+          "stage": "two_concurrent_warm",
+          "chain": "bnb",
+          "batchSize": 2,
+          "requests": [
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "latest",
+                false
+              ]
+            },
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "latest",
+                false
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 32.83,
+          "stage": "two_concurrent_warm",
+          "chain": "base",
+          "batchSize": 2,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x3d0695420000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "0x64"
+              ],
+              "function": "quoteTarget(address)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x3d0695420000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "0x64"
+              ],
+              "function": "quoteTarget(address)"
+            }
+          ]
+        },
+        {
+          "atMs": 32.97,
+          "stage": "two_concurrent_warm",
+          "chain": "bnb",
+          "batchSize": 2,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x3d0695420000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "0x64"
+              ],
+              "function": "quoteTarget(address)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0x3d0695420000000000000000000000000000000000000000000000000000000000000000",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "0x64"
+              ],
+              "function": "quoteTarget(address)"
+            }
+          ]
+        },
+        {
+          "atMs": 44.6,
+          "stage": "two_concurrent_warm",
+          "chain": "base",
+          "batchSize": 2,
+          "requests": [
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "0x64",
+                false
+              ]
+            },
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "0x64",
+                false
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 44.73,
+          "stage": "two_concurrent_warm",
+          "chain": "bnb",
+          "batchSize": 2,
+          "requests": [
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "0x64",
+                false
+              ]
+            },
+            {
+              "method": "eth_getBlockByNumber",
+              "params": [
+                "0x64",
+                false
+              ]
+            }
+          ]
+        },
+        {
+          "atMs": 56.12,
+          "stage": "two_concurrent_warm",
+          "chain": "base",
+          "batchSize": 2,
+          "requests": [
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0xfa8478360000000000000000000000002222222222222222222222222222222222222222",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "stablecoins(address)"
+            },
+            {
+              "method": "eth_call",
+              "params": [
+                {
+                  "data": "0xfa8478360000000000000000000000002222222222222222222222222222222222222222",
+                  "to": "0x1111111111111111111111111111111111111111"
+                },
+                "latest"
+              ],
+              "function": "stablecoins(address)"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

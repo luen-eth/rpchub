@@ -52,6 +52,9 @@ services:
 
   gateway:
     image: nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
+    labels:
+      # Change with gateway policy updates so Compose recreates the process.
+      io.rpchub.gateway-policy: memehub-readiness-v2
     restart: unless-stopped
     depends_on:
       rpchub:
