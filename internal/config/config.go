@@ -30,6 +30,8 @@ type Config struct {
 	ProbeInterval   time.Duration
 	RequestTimeout  time.Duration
 	MaxRetries      int
+	ReadOnly        bool
+	MaxBatchItems   int
 	MaxBlockLag     uint64
 	FilterTracking  bool
 	AllowHTTP       bool
@@ -37,6 +39,7 @@ type Config struct {
 	MaxWSConns      int
 	CacheDir        string
 	ChainlistURL    string
+	ChainlistFile   string // optional local-only registry; disables remote fetch and refresh
 	LogLevel        slog.Level
 }
 
@@ -112,6 +115,15 @@ func Load(environ []string) (*Config, error) {
 	if cfg.MaxRetries < 1 {
 		return nil, fmt.Errorf("MAX_RETRIES: must be >= 1")
 	}
+	if cfg.ReadOnly, err = boolVal(env, "READ_ONLY", false); err != nil {
+		return nil, err
+	}
+	if cfg.MaxBatchItems, err = intVal(env, "MAX_BATCH_ITEMS", 0); err != nil {
+		return nil, err
+	}
+	if cfg.MaxBatchItems < 0 {
+		return nil, fmt.Errorf("MAX_BATCH_ITEMS: must be >= 0")
+	}
 	lag, err := intVal(env, "MAX_BLOCK_LAG", int(cfg.MaxBlockLag))
 	if err != nil {
 		return nil, err
@@ -129,6 +141,9 @@ func Load(environ []string) (*Config, error) {
 	if cfg.WSEnabled, err = boolVal(env, "WS_ENABLED", cfg.WSEnabled); err != nil {
 		return nil, err
 	}
+	if cfg.ReadOnly && cfg.WSEnabled {
+		return nil, fmt.Errorf("READ_ONLY requires WS_ENABLED=false; WebSocket relays cannot enforce read-only methods")
+	}
 	if cfg.MaxWSConns, err = intVal(env, "MAX_WS_CONNS", cfg.MaxWSConns); err != nil {
 		return nil, err
 	}
@@ -141,6 +156,7 @@ func Load(environ []string) (*Config, error) {
 	if v := env["CHAINLIST_URL"]; v != "" {
 		cfg.ChainlistURL = v
 	}
+	cfg.ChainlistFile = env["CHAINLIST_FILE"]
 	if v, ok := env["LOG_LEVEL"]; ok && v != "" {
 		switch strings.ToLower(v) {
 		case "debug":

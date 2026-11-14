@@ -61,11 +61,9 @@ func run() error {
 	}
 
 	reg := registry.New()
-	var entries []registry.ChainEntry
-	if len(cfg.ChainIDs) > 0 {
-		if entries, err = registry.LoadSource(ctx, client, cfg.ChainlistURL, cfg.CacheDir, log); err != nil {
-			return err
-		}
+	entries, err := loadChainEntries(ctx, cfg, client, log)
+	if err != nil {
+		return err
 	}
 	if err := reg.Update(entries, opts); err != nil {
 		return err
@@ -101,17 +99,19 @@ func run() error {
 		}
 	}
 
-	if len(cfg.ChainIDs) > 0 {
+	if len(cfg.ChainIDs) > 0 && cfg.ChainlistFile == "" {
 		go refreshLoop(ctx, cfg, client, reg, opts, syncPools, log)
 	}
 
 	proxyH := &proxy.Handler{
-		Reg:        reg,
-		Pools:      pools,
-		Client:     client,
-		MaxRetries: cfg.MaxRetries,
-		Timeout:    cfg.RequestTimeout,
-		Log:        log,
+		Reg:           reg,
+		Pools:         pools,
+		Client:        client,
+		MaxRetries:    cfg.MaxRetries,
+		ReadOnly:      cfg.ReadOnly,
+		MaxBatchItems: cfg.MaxBatchItems,
+		Timeout:       cfg.RequestTimeout,
+		Log:           log,
 	}
 
 	var wsH *proxy.WSHandler
@@ -172,9 +172,22 @@ func run() error {
 	return srv.Shutdown(shutdownCtx)
 }
 
+func loadChainEntries(ctx context.Context, cfg *config.Config, client *http.Client, log *slog.Logger) ([]registry.ChainEntry, error) {
+	if cfg.ChainlistFile != "" {
+		return registry.LoadFile(cfg.ChainlistFile)
+	}
+	if len(cfg.ChainIDs) > 0 {
+		return registry.LoadSource(ctx, client, cfg.ChainlistURL, cfg.CacheDir, log)
+	}
+	return nil, nil
+}
+
 // refreshLoop refetches the chainlist periodically so new public RPCs join
 // the pools (and removed ones leave) without a restart.
 func refreshLoop(ctx context.Context, cfg *config.Config, client *http.Client, reg *registry.Registry, opts registry.BuildOptions, syncPools func(), log *slog.Logger) {
+	if cfg.ChainlistFile != "" {
+		return
+	}
 	t := time.NewTicker(cfg.RefreshInterval)
 	defer t.Stop()
 	for {

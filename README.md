@@ -121,6 +121,12 @@ Batch responses retain successful entries and retry only failed, allowlisted rea
 
 ## Deployment (Docker / Dokploy)
 
+For a provider-isolated Base/BNB deployment with an authenticated gateway, see
+[the Memehub archive transport profile](deploy/memehub/README.md). It adds a
+local registry source and optional read-only/batch limits without changing the
+default public-pool behavior. Provider isolation alone does not establish
+independent archive correctness.
+
 ```sh
 docker compose up -d --build
 ```

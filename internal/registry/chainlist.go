@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// maxChainlistBytes caps the rpcs.json download (currently ~2 MB).
+// maxChainlistBytes caps remote and local chainlist input (currently ~2 MB remotely).
 const maxChainlistBytes = 64 << 20
 
 const cacheFileName = "rpcs.json"
@@ -34,6 +34,38 @@ type ChainEntry struct {
 	ShortName string     `json:"shortName"`
 	IsTestnet bool       `json:"isTestnet"`
 	RPC       []RPCEntry `json:"rpc"`
+}
+
+// LoadFile reads an explicitly configured local registry. It never contacts a
+// remote source or substitutes cached data when the file is missing or invalid.
+func LoadFile(filename string) ([]ChainEntry, error) {
+	info, err := os.Stat(filename)
+	if err != nil {
+		return nil, fmt.Errorf("stat chainlist file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("chainlist file must be a regular file")
+	}
+	if info.Size() > maxChainlistBytes {
+		return nil, fmt.Errorf("chainlist file exceeds %d-byte limit", maxChainlistBytes)
+	}
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("open chainlist file: %w", err)
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, maxChainlistBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read chainlist file: %w", err)
+	}
+	if len(raw) > maxChainlistBytes {
+		return nil, fmt.Errorf("chainlist file exceeds %d-byte limit", maxChainlistBytes)
+	}
+	entries, err := decodeChainlist(raw)
+	if err != nil {
+		return nil, fmt.Errorf("decode chainlist file: %w", err)
+	}
+	return entries, nil
 }
 
 // FetchChainlist downloads and decodes rpcs.json. It returns the decoded

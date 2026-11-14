@@ -1,0 +1,4 @@
+[
+  { "name": "BNB Smart Chain Mainnet", "chainId": 56, "chainSlug": "bnb", "shortName": "bnb", "isTestnet": false, "rpc": [] },
+  { "name": "Base Mainnet", "chainId": 8453, "chainSlug": "base", "shortName": "base", "isTestnet": false, "rpc": [] }
+]

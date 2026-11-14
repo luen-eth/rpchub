@@ -2,6 +2,10 @@
 rpchub
 data
 .env
+*.env
+.env.*
+*.htpasswd
+deploy/memehub/private
 *.md
 
 examples/ponder

@@ -1,4 +1,9 @@
 /rpchub
 /data/
 .env
+*.env
+.env.*
+!**/.env.example
+*.htpasswd
+/deploy/memehub/private/
 *.log

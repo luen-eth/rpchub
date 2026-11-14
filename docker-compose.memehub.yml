@@ -1,0 +1,91 @@
+name: rpchub-memehub
+
+services:
+  auth-init:
+    image: nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
+    restart: "no"
+    entrypoint: [/bin/sh, /init-auth.sh]
+    environment:
+      RPCHUB_GATEWAY_HTPASSWD: ${RPCHUB_GATEWAY_HTPASSWD:?Set the private gateway password-hash entry}
+    volumes:
+      - ./deploy/memehub/init-auth.sh:/init-auth.sh:ro
+      - gateway-auth:/auth
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 16m
+    cpus: 0.1
+    pids_limit: 16
+
+  rpchub:
+    image: ${RPCHUB_IMAGE:-rpchub:memehub-archive}
+    build: .
+    restart: unless-stopped
+    environment:
+      PORT: "9563"
+      CHAIN_IDS: "56,8453"
+      CHAINLIST_FILE: /etc/rpchub/memehub-chains.json
+      EXTRA_RPCS_56: ${BNB_RPC_URL:?Set one explicitly verified BNB upstream}
+      EXTRA_RPCS_8453: ${BASE_RPC_URL:?Set one explicitly verified Base upstream}
+      SOLANA_ENABLED: "false"
+      WS_ENABLED: "false"
+      READ_ONLY: "true"
+      MAX_BATCH_ITEMS: "30"
+      PROBE_INTERVAL: "60s"
+      REQUEST_TIMEOUT: "20s"
+      MAX_RETRIES: "1"
+      MAX_BLOCK_LAG: "10"
+      LOG_LEVEL: "warn"
+      CACHE_DIR: /tmp/rpchub
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    networks: [backend]
+    # No host-published RPC port. Keep each SAFU witness provider isolated.
+
+  gateway:
+    image: nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
+    restart: unless-stopped
+    depends_on:
+      rpchub:
+        condition: service_started
+      auth-init:
+        condition: service_completed_successfully
+    entrypoint: [nginx, -g, "daemon off;"]
+    volumes:
+      - ./deploy/memehub/nginx.conf:/etc/nginx/nginx.conf:ro
+      - gateway-auth:/etc/rpchub-auth:ro
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=16m,noexec,nosuid
+      - /var/run:size=1m,noexec,nosuid
+      - /tmp:size=1m,noexec,nosuid
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 64
+    expose: ["8080"]
+    networks: [backend, edge]
+    healthcheck:
+      test: [CMD, wget, -qO-, "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+
+volumes:
+  gateway-auth: {}
+
+networks:
+  backend: {}
+  edge:
+    external: true
+    name: ${RPCHUB_EDGE_NETWORK:-dokploy-network}

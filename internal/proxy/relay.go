@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"rpchub/internal/pool"
 	"rpchub/internal/registry"
@@ -17,6 +18,56 @@ func (h *Handler) ProxyIndexer(w http.ResponseWriter, r *http.Request) { h.proxy
 type pendingCall struct {
 	raw json.RawMessage
 	req rpcutil.Request
+}
+
+// decodeEnvelope avoids encoding/json's case-insensitive struct field matching.
+// The validated method must be the same canonical member the upstream executes.
+// Token decodes key escapes before duplicate detection; parameter data stays raw.
+func decodeEnvelope(raw json.RawMessage) (rpcutil.Request, error) {
+	var req rpcutil.Request
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	opening, err := decoder.Token()
+	if err != nil || opening != json.Delim('{') {
+		return req, fmt.Errorf("request must be an object")
+	}
+	seen := make(map[string]bool, 4)
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return req, fmt.Errorf("invalid request member")
+		}
+		key, ok := token.(string)
+		if !ok || seen[key] {
+			return req, fmt.Errorf("duplicate or invalid request member")
+		}
+		seen[key] = true
+		switch key {
+		case "jsonrpc":
+			err = decoder.Decode(&req.JSONRPC)
+		case "id":
+			err = decoder.Decode(&req.ID)
+		case "method":
+			err = decoder.Decode(&req.Method)
+		case "params":
+			err = decoder.Decode(&req.Params)
+		default:
+			return req, fmt.Errorf("noncanonical request member")
+		}
+		if err != nil {
+			return req, fmt.Errorf("invalid request member value")
+		}
+	}
+	closing, err := decoder.Token()
+	if err != nil || closing != json.Delim('}') {
+		return req, fmt.Errorf("invalid request object")
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return req, fmt.Errorf("trailing request data")
+	}
+	if req.JSONRPC != "2.0" || req.Method == "" {
+		return req, fmt.Errorf("invalid request")
+	}
+	return req, nil
 }
 
 func decodeCalls(body []byte) ([]pendingCall, bool, error) {
@@ -33,8 +84,8 @@ func decodeCalls(body []byte) ([]pendingCall, bool, error) {
 	seen := map[string]bool{}
 	calls := make([]pendingCall, 0, len(raws))
 	for _, raw := range raws {
-		var req rpcutil.Request
-		if err := json.Unmarshal(raw, &req); err != nil || req.JSONRPC != "2.0" || req.Method == "" {
+		req, err := decodeEnvelope(raw)
+		if err != nil {
 			return nil, batch, fmt.Errorf("invalid request")
 		}
 		if len(req.Params) > 0 && string(req.Params) != "null" && req.Params[0] != '[' && req.Params[0] != '{' {
@@ -87,6 +138,19 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request, pl *pool.Pool, b
 		w.WriteHeader(400)
 		json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": nil, "error": map[string]any{"code": code, "message": "invalid JSON-RPC request or duplicate batch ID"}})
 		return
+	}
+	if h.MaxBatchItems > 0 && len(calls) > h.MaxBatchItems {
+		writeRPCError(w, http.StatusBadRequest, "rpchub: request exceeds the batch item limit")
+		return
+	}
+	if h.ReadOnly {
+		for _, c := range calls {
+			id := bytes.TrimSpace(c.req.ID)
+			if !rpcutil.ReadOnly(c.req.Method) || len(id) == 0 || bytes.Equal(id, []byte("null")) {
+				writeRPCError(w, http.StatusBadRequest, "rpchub: read-only mode requires allowlisted reads with non-null IDs")
+				return
+			}
+		}
 	}
 	if indexer {
 		for _, c := range calls {

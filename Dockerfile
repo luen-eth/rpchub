@@ -10,6 +10,7 @@ RUN apk add --no-cache ca-certificates \
 	&& adduser -D -H rpchub \
 	&& mkdir -p /data && chown rpchub /data
 COPY --from=build /out/rpchub /usr/local/bin/rpchub
+COPY deploy/memehub/chains.json /etc/rpchub/memehub-chains.json
 USER rpchub
 ENV PORT=9563 CACHE_DIR=/data
 EXPOSE 9563

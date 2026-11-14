@@ -32,6 +32,28 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ChainlistURL != DefaultChainlistURL {
 		t.Errorf("ChainlistURL = %q", cfg.ChainlistURL)
 	}
+	if cfg.ChainlistFile != "" {
+		t.Errorf("ChainlistFile = %q, want empty by default", cfg.ChainlistFile)
+	}
+}
+
+func TestLocalChainlistConfiguration(t *testing.T) {
+	cfg, err := Load([]string{
+		"CHAIN_IDS=8453,56",
+		"CHAINLIST_FILE=/etc/rpchub/base and bnb.json",
+		"CHAINLIST_URL=https://unused.example/rpcs.json",
+		"EXTRA_RPCS_8453=https://base.example",
+		"EXTRA_RPCS_56=https://bnb.example",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ChainlistFile != "/etc/rpchub/base and bnb.json" {
+		t.Errorf("ChainlistFile = %q", cfg.ChainlistFile)
+	}
+	if len(cfg.ChainIDs) != 2 || len(cfg.ExtraRPCs["8453"]) != 1 || len(cfg.ExtraRPCs["56"]) != 1 {
+		t.Fatalf("local registry configuration lost chain or explicit endpoint settings: %+v", cfg)
+	}
 }
 
 func TestLoadNoChains(t *testing.T) {

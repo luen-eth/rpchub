@@ -25,14 +25,16 @@ const (
 )
 
 type Handler struct {
-	Reg         *registry.Registry
-	Pools       *pool.Set
-	Client      *http.Client
-	MaxRetries  int
-	Timeout     time.Duration
-	Log         *slog.Logger
-	indexMu     sync.Mutex
-	indexStates map[string]*indexState
+	Reg           *registry.Registry
+	Pools         *pool.Set
+	Client        *http.Client
+	MaxRetries    int
+	ReadOnly      bool // require allowlisted reads with non-null IDs on all HTTP RPC routes
+	MaxBatchItems int  // zero preserves the legacy unlimited batch count
+	Timeout       time.Duration
+	Log           *slog.Logger
+	indexMu       sync.Mutex
+	indexStates   map[string]*indexState
 }
 
 // Proxy handles "POST /{chain}".
